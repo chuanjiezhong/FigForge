@@ -1,0 +1,37 @@
+.panelList {
+  padding: 16px;
+  height: 100%;
+  overflow: auto;
+  background: #fff;
+
+  .title {
+    margin-bottom: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #262626;
+  }
+
+  .empty {
+    margin-top: 40px;
+  }
+
+  .list {
+    :global {
+      .ant-list-item {
+        padding: 12px;
+        border-bottom: 1px solid #f0f0f0;
+        cursor: pointer;
+        transition: background-color 0.2s;
+
+        &:hover {
+          background-color: #f5f5f5;
+        }
+
+        &:last-child {
+          border-bottom: none;
+        }
+      }
+    }
+  }
+}
+

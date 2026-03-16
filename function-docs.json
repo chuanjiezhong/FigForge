@@ -1,0 +1,839 @@
+{
+  "githubPackages": [
+    "chuanjiezhong/OmicsFlowCoreFullVersion"
+  ],
+  "packages": [
+    {
+      "package": "OmicsFlowCoreFullVersion",
+      "functions": [
+        {
+          "name": "transcriptome_normalize_matrix",
+          "category": "transcriptomics",
+          "description": "标准化表达矩阵并保存到本地",
+          "documentation": "标准化表达矩阵并保存到本地\n\n读取原始表达矩阵文件和分组信息文件（对照组/实验组），进行重复探针平均、可选 log2 转换、数组间标准化（normalizeBetweenArrays），最终输出加标签的标准化表达矩阵。\n\n@return 返回标准化后的表达矩阵（数值型，行是基因，列是样本）",
+          "detailedParameters": [
+            {
+              "name": "expr_file",
+              "type": "file",
+              "description": "表达矩阵文件路径（第一列为基因名，其余为样本表达值）",
+              "required": true,
+              "placeholder": "请选择表达矩阵文件"
+            },
+            {
+              "name": "group_file",
+              "type": "file",
+              "description": "多组样本分组文件路径（两列：sample, group）",
+              "required": true,
+              "placeholder": "请选择分组文件"
+            },
+            {
+              "name": "geo_id",
+              "type": "string",
+              "description": "GEO 数据编号",
+              "required": false,
+              "placeholder": "例如：GSE123456"
+            },
+            {
+              "name": "out_dir",
+              "type": "directory",
+              "description": "输出目录，默认为当前工作目录",
+              "required": false,
+              "default": ".",
+              "placeholder": "请选择输出目录（默认当前目录 .）"
+            },
+            {
+              "name": "log_cutoff",
+              "type": "select",
+              "description": "合理性判断是否 log2 转换：NULL 自动判断，TRUE 强制转，FALSE 不转",
+              "required": false,
+              "default": "NULL",
+              "options": [
+                "NULL",
+                "TRUE",
+                "FALSE"
+              ]
+            },
+            {
+              "name": "overwrite",
+              "type": "boolean",
+              "description": "是否覆盖已有文件",
+              "required": false,
+              "default": true
+            },
+            {
+              "name": "geo_fileName",
+              "type": "string",
+              "description": "用于输出文件名，默认取表达矩阵文件名",
+              "required": false,
+              "placeholder": "留空则使用表达矩阵文件名"
+            }
+          ]
+        },
+        {
+          "name": "transcriptome_plot_heatmap_limma",
+          "category": "transcriptomics",
+          "redrawFunction": "transcriptome_redraw_heatmap_rds",
+          "redrawParameters": [
+            { "name": "rds_file", "type": "string", "required": true, "default": "heatmap.rds" },
+            { "name": "out_file", "type": "string", "required": false, "default": "heatmap_redraw_preview.png" },
+            { "name": "palette", "type": "colorGradient", "required": false, "default": "blue,white,red" },
+            { "name": "annotation_colors_list", "type": "annotationColors", "required": false },
+            { "name": "show_gene_names", "type": "boolean", "required": false, "default": false },
+            { "name": "fontsize", "type": "number", "required": false, "default": 12, "min": 1 },
+            { "name": "width", "type": "number", "required": false, "default": 8, "min": 1 },
+            { "name": "height", "type": "number", "required": false, "default": 10, "min": 1 },
+            { "name": "image_format", "type": "select", "required": false, "default": "png", "options": ["png", "pdf"] },
+            { "name": "dpi", "type": "number", "required": false, "default": 150, "min": 72 }
+          ],
+          "description": "使用 limma 进行差异分析并绘制热图（支持注释颜色自定义与感兴趣基因可选）",
+          "documentation": "使用 limma 进行差异分析并绘制热图（支持注释颜色自定义 & 感兴趣基因可选）\n\n输入表达矩阵，调用 limma 进行两组差异分析，筛选上下调显著基因，并用 pheatmap 绘制热图；可选传入 genes_file，则热图按感兴趣基因展示。\n\n@return 不可见 list，包含差异结果和绘图矩阵等。",
+          "detailedParameters": [
+            {
+              "name": "expr_file",
+              "type": "file",
+              "description": "表达矩阵文件路径，首列为基因名，后续列为样本表达量",
+              "required": true,
+              "placeholder": "请选择表达矩阵文件"
+            },
+            {
+              "name": "out_dir",
+              "type": "directory",
+              "description": "输出目录",
+              "required": false,
+              "default": ".",
+              "placeholder": "请选择输出目录（默认 .）"
+            },
+            {
+              "name": "group_regex",
+              "type": "string",
+              "description": "列名解析正则，依次提取 DataSet、Sample、Group",
+              "required": false,
+              "default": "(.+)_([^_]+)_([^_]+)",
+              "placeholder": "例如：(.+)_([^_]+)_([^_]+)"
+            },
+            {
+              "name": "contrast",
+              "type": "tags",
+              "description": "比较组（可搜索、可输入，选中后以标签显示）",
+              "required": true,
+              "placeholder": "输入或选择，如 Control、Disease",
+              "options": [
+                "Control",
+                "Disease"
+              ],
+              "default": [
+                "Control",
+                "Disease"
+              ]
+            },
+            {
+              "name": "logfc_thr",
+              "type": "number",
+              "description": "log2FC 阈值",
+              "required": false,
+              "default": 1
+            },
+            {
+              "name": "adjp_thr",
+              "type": "number",
+              "description": "FDR 阈值",
+              "required": false,
+              "default": 0.05
+            },
+            {
+              "name": "top_n",
+              "type": "number",
+              "description": "每个方向最多展示多少个显著基因",
+              "required": false,
+              "default": 100000,
+              "min": 1
+            },
+            {
+              "name": "cluster_cols",
+              "type": "boolean",
+              "description": "是否聚类样本列",
+              "required": false,
+              "default": false
+            },
+            {
+              "name": "palette",
+              "type": "colorGradient",
+              "description": "热图颜色渐变（使用下方色块选择，或逗号分隔颜色名/十六进制）",
+              "required": false,
+              "default": "blue,white,red",
+              "placeholder": "例如：blue,white,red"
+            },
+            {
+              "name": "annotation_dataset_levels",
+              "type": "tags",
+              "description": "DataSet 样本名称（与 Group 类似，每个样本名对应一种颜色）；填写后下方可为每个样本设置颜色",
+              "required": false,
+              "placeholder": "输入样本名称，如 GSE123456、Sample1"
+            },
+            {
+              "name": "annotation_colors_list",
+              "type": "annotationColors",
+              "description": "自定义注释列颜色：Group 按 contrast 两组，DataSet 按上方填写的样本名称（每个样本对应一色）",
+              "required": false,
+              "dependsOn": "contrast"
+            },
+            {
+              "name": "scale_rows",
+              "type": "string",
+              "description": "是否标准化基因行",
+              "required": false,
+              "default": "row",
+              "placeholder": "例如：row"
+            },
+            {
+              "name": "show_gene_names",
+              "type": "boolean",
+              "description": "是否展示基因名",
+              "required": false,
+              "default": false
+            },
+            {
+              "name": "use_adj_pval",
+              "type": "boolean",
+              "description": "显著性用 adj.P.Val (TRUE) 或 P.Value (FALSE)",
+              "required": false,
+              "default": true
+            },
+            {
+              "name": "genes_file",
+              "type": "file",
+              "description": "感兴趣基因文件路径（每行一个基因），默认不限制",
+              "required": false,
+              "placeholder": "可选：选择感兴趣基因文件"
+            },
+            {
+              "name": "goi_mode",
+              "type": "select",
+              "description": "感兴趣基因使用模式",
+              "required": false,
+              "default": "intersect_sig",
+              "options": [
+                "intersect_sig",
+                "all_matches"
+              ]
+            },
+            {
+              "name": "fontsize",
+              "type": "number",
+              "description": "字体大小",
+              "required": false,
+              "default": 12,
+              "min": 1
+            },
+            {
+              "name": "width",
+              "type": "number",
+              "description": "PDF 宽度（英寸）",
+              "required": false,
+              "default": 8,
+              "min": 1,
+              "placeholder": "留空使用默认 8"
+            },
+            {
+              "name": "height",
+              "type": "number",
+              "description": "PDF 高度（英寸）",
+              "required": false,
+              "default": 10,
+              "min": 1,
+              "placeholder": "留空使用默认 10"
+            },
+            {
+              "name": "image_format",
+              "type": "select",
+              "description": "输出格式：pdf 或 png",
+              "required": false,
+              "default": "pdf",
+              "options": [
+                "pdf",
+                "png"
+              ]
+            },
+            {
+              "name": "save_rds",
+              "type": "boolean",
+              "description": "是否保存 rds（包含热图对象与数据）",
+              "required": false,
+              "default": true
+            },
+            {
+              "name": "rds_file",
+              "type": "string",
+              "description": "rds 文件名",
+              "required": false,
+              "default": "heatmap.rds",
+              "placeholder": "例如：heatmap.rds"
+            }
+          ]
+        },
+        {
+          "name": "transcriptome_convert_counts_geneid_symbol",
+          "category": "transcriptomics",
+          "description": "GEO counts 数据中 GeneID 与 Symbol 转换并输出多份文件",
+          "documentation": "GEO counts 数据：GeneID 与 Symbol 转换并输出文件\n\n读取 raw counts（第一列为 GeneID）与注释表（包含 GeneID 与 Symbol），按 GeneID 匹配 Symbol，输出 3 份文件：带 GeneID+Symbol 的矩阵、仅 geneName 的矩阵、以及 GeneID-Symbol 对照表。\n\n@param counts_file character；counts 文件路径（第一列为 GeneID，其余为样本列）。\n@param annot_file character；注释文件路径（至少包含 GeneID 与 Symbol 两列）。\n@param out_dir character；输出目录，默认当前目录。\n@param prefix character；输出文件名前缀，默认 \"counts_annotated\"。\n@param geneid_col character；counts 表中 GeneID 列名，默认 \"GeneID\"。\n@param symbol_col character；注释表中 Symbol 列名，默认 \"Symbol\"。\n@param overwrite logical；是否覆盖输出文件，默认 FALSE。\n\n@return 不可见 list，包含处理后的数据框与输出路径。",
+          "detailedParameters": [
+            {
+              "name": "counts_file",
+              "type": "file",
+              "description": "raw counts 文件路径（第一列为 GeneID，其余为样本列）",
+              "required": true,
+              "placeholder": "请选择 raw counts 文件"
+            },
+            {
+              "name": "annot_file",
+              "type": "file",
+              "description": "基因注释文件路径（至少包含 GeneID 与 Symbol 两列）",
+              "required": true,
+              "placeholder": "请选择注释文件"
+            },
+            {
+              "name": "out_dir",
+              "type": "directory",
+              "description": "输出目录，默认当前工作目录",
+              "required": false,
+              "default": ".",
+              "placeholder": "请选择输出目录（默认当前目录 .）"
+            },
+            {
+              "name": "prefix",
+              "type": "string",
+              "description": "输出文件名前缀",
+              "required": false,
+              "default": "counts_annotated",
+              "placeholder": "例如：GSE165512_raw_counts"
+            },
+            {
+              "name": "geneid_col",
+              "type": "string",
+              "description": "counts 表中 GeneID 列名",
+              "required": false,
+              "default": "GeneID",
+              "placeholder": "例如：GeneID"
+            },
+            {
+              "name": "symbol_col",
+              "type": "string",
+              "description": "注释表中 Symbol 列名",
+              "required": false,
+              "default": "Symbol",
+              "placeholder": "例如：Symbol"
+            },
+            {
+              "name": "overwrite",
+              "type": "boolean",
+              "description": "是否覆盖已有输出文件",
+              "required": false,
+              "default": false
+            }
+          ]
+        },
+        {
+          "name": "transcriptome_read_expr_matrix",
+          "category": "transcriptomics",
+          "description": "从 GEO 的 probe.txt + ann.txt 生成按基因合并的表达矩阵",
+          "documentation": "从 probe.txt + ann.txt 生成表达矩阵（按基因合并）\n\n从 GEO 的 series_matrix/probe 表中提取表达矩阵，并用注释文件把探针 ID 映射到基因名；支持过滤明显“非基因名”的 symbol，并对重复基因（多个探针）取均值合并。\n\n@param probe_file character；表达矩阵文件路径（支持包含 `!series_matrix_table_begin` 的 GEO 格式）。\n@param ann_file character；注释文件路径（第 1 列为探针 ID；默认第 11 列为 Gene Symbol）。\n@param out_dir character；输出目录，默认当前目录。\n@param prefix character；输出文件名前缀，默认 \"expr_matrix\"。\n@param gene_symbol_col integer；基因名所在列（1-based），默认 11。\n@param max_ann_rows integer；读取注释表最大行数，默认 60000。\n@param write_excel_safe logical；是否额外输出 Excel 安全版本（基因名前加 `'`），默认 TRUE。\n@param overwrite logical；是否覆盖输出文件，默认 FALSE。\n\n@return 不可见 list，包含表达矩阵、probe 合并信息和输出路径。",
+          "detailedParameters": [
+            {
+              "name": "probe_file",
+              "type": "file",
+              "description": "probe 表/series_matrix 表达矩阵文件路径（支持包含 !series_matrix_table_begin 的 GEO 格式）",
+              "required": true,
+              "placeholder": "请选择 probe 表/series_matrix 文件"
+            },
+            {
+              "name": "ann_file",
+              "type": "file",
+              "description": "注释文件路径（第 1 列为探针 ID；默认第 11 列为 Gene Symbol）",
+              "required": true,
+              "placeholder": "请选择注释文件 ann.txt"
+            },
+            {
+              "name": "out_dir",
+              "type": "directory",
+              "description": "输出目录，默认当前工作目录",
+              "required": false,
+              "default": ".",
+              "placeholder": "请选择输出目录（默认当前目录 .）"
+            },
+            {
+              "name": "prefix",
+              "type": "string",
+              "description": "输出文件名前缀",
+              "required": false,
+              "default": "expr_matrix",
+              "placeholder": "例如：GSE87466_expr"
+            },
+            {
+              "name": "gene_symbol_col",
+              "type": "number",
+              "description": "基因名所在列（1-based）",
+              "required": false,
+              "default": 11,
+              "min": 1
+            },
+            {
+              "name": "max_ann_rows",
+              "type": "number",
+              "description": "读取注释表最大行数",
+              "required": false,
+              "default": 60000,
+              "min": 1
+            },
+            {
+              "name": "write_excel_safe",
+              "type": "boolean",
+              "description": "是否额外输出 Excel 安全版本（基因名前加 `'`）",
+              "required": false,
+              "default": true
+            },
+            {
+              "name": "overwrite",
+              "type": "boolean",
+              "description": "是否覆盖已有输出文件",
+              "required": false,
+              "default": false
+            }
+          ]
+        },
+        {
+          "name": "transcriptome_count_to_tpm",
+          "category": "transcriptomics",
+          "description": "将基因 count 矩阵转换为 TPM（使用基因 effective_length）",
+          "documentation": "将 count 矩阵转换为 TPM（使用基因 effective_length）\n\n读取原始基因 count 矩阵和对应物种的基因长度文件（effective_length 列），进行重复基因名合并、过滤 0 表达基因，并计算 TPM 与 log2(TPM+1)。\n\n@param count_file character；count 矩阵文件路径，首列为基因名，后续列为样本 read count。\n@param species character；物种，\"human\" 或 \"mouse\"。\n@param out_dir character；输出目录，默认当前工作目录。\n@param out_prefix character；输出文件前缀，默认 \"TPM\"。\n@param log2 logical；是否同时输出 log2TPM（log2(TPM+1)），默认 TRUE。\n\n@return 不可见 list，包含 TPM 矩阵和（可选）log2TPM 矩阵。",
+          "detailedParameters": [
+            {
+              "name": "count_file",
+              "type": "file",
+              "description": "count 矩阵文件路径（首列为基因名，后续列为样本 read count）",
+              "required": true,
+              "placeholder": "请选择 count 矩阵文件"
+            },
+            {
+              "name": "species",
+              "type": "select",
+              "description": "物种（human 或 mouse）",
+              "required": true,
+              "default": "human",
+              "options": [
+                "human",
+                "mouse"
+              ]
+            },
+            {
+              "name": "out_dir",
+              "type": "directory",
+              "description": "输出目录，默认当前工作目录",
+              "required": false,
+              "default": ".",
+              "placeholder": "请选择输出目录（默认当前目录 .）"
+            },
+            {
+              "name": "out_prefix",
+              "type": "string",
+              "description": "输出文件前缀",
+              "required": false,
+              "default": "TPM",
+              "placeholder": "例如：mouse_TPM"
+            },
+            {
+              "name": "log2",
+              "type": "boolean",
+              "description": "是否同时输出 log2TPM（log2(TPM+1)）",
+              "required": false,
+              "default": true
+            }
+          ]
+        },
+        {
+          "name": "transcriptome_merge_normalize_combat",
+          "category": "transcriptomics",
+          "description": "合并多个标准化表达矩阵并可选进行 ComBat 批次校正",
+          "documentation": "合并多个标准化表达矩阵并进行 ComBat 批次校正\n\n批量读取以 `.normalize.txt` 结尾的表达矩阵文件，先对每个矩阵做重复基因平均（limma::avereps），取共同基因后合并成一个矩阵；可选用 sva::ComBat 进行批次效应校正。\n\n输入文件支持两种常见格式：\n- 第一列为基因名，其余列为样本（带列名）\n- 第一行以 `id`/`geneNames` 开头，存放样本名（无列名）；其余行为表达矩阵\n\n@param input_dir character；输入目录，默认当前目录。\n@param pattern character；用于筛选输入文件的正则，默认 \"\\\\.normalize\\\\.txt$\"。\n@param files character|NULL；显式指定文件路径向量（优先于 input_dir+pattern），默认 NULL。\n@param out_dir character；输出目录，默认当前目录。\n@param prefix character；输出文件名前缀，默认 \"merge\"。\n@param overwrite logical；是否覆盖输出文件，默认 FALSE。\n@param do_combat logical；是否做 ComBat 批次校正，默认 TRUE。\n@param par_prior logical；ComBat 参数，默认 TRUE。\n@param batch_from_filename logical；是否从文件名提取数据集名作为 batch，默认 FALSE（按读入顺序分批）。\n@param batch_regex character；当 batch_from_filename=TRUE 时，用于提取 batch 的正则（第1个捕获组），默认 \"^([^.\\-]+)\"。\n\n@return 不可见 list，包含合并矩阵、校正矩阵（若启用）、批次向量与输出路径。",
+          "detailedParameters": [
+            {
+              "name": "input_dir",
+              "type": "directory",
+              "description": "输入目录（自动查找符合 pattern 的文件）",
+              "required": false,
+              "default": ".",
+              "placeholder": "请选择输入目录（默认当前目录 .）"
+            },
+            {
+              "name": "pattern",
+              "type": "string",
+              "description": "用于筛选输入文件的正则表达式",
+              "required": false,
+              "default": "\\\\.normalize\\\\.txt$",
+              "placeholder": "例如：\\\\.normalize\\\\.txt$"
+            },
+            {
+              "name": "files",
+              "type": "fileList",
+              "description": "显式指定多个输入文件（优先于 input_dir + pattern）",
+              "required": false,
+              "placeholder": "可选：手动选择多个 .normalize.txt 文件"
+            },
+            {
+              "name": "out_dir",
+              "type": "directory",
+              "description": "输出目录，默认当前工作目录",
+              "required": false,
+              "default": ".",
+              "placeholder": "请选择输出目录（默认当前目录 .）"
+            },
+            {
+              "name": "prefix",
+              "type": "string",
+              "description": "输出文件名前缀",
+              "required": false,
+              "default": "merge",
+              "placeholder": "例如：merge"
+            },
+            {
+              "name": "overwrite",
+              "type": "boolean",
+              "description": "是否覆盖已有输出文件",
+              "required": false,
+              "default": false
+            },
+            {
+              "name": "do_combat",
+              "type": "boolean",
+              "description": "是否使用 ComBat 进行批次校正",
+              "required": false,
+              "default": true
+            },
+            {
+              "name": "par_prior",
+              "type": "boolean",
+              "description": "ComBat 参数 par.prior（经验贝叶斯）",
+              "required": false,
+              "default": true
+            },
+            {
+              "name": "batch_from_filename",
+              "type": "boolean",
+              "description": "是否从文件名提取 batch（TRUE 时按正则 batch_regex 抽取）",
+              "required": false,
+              "default": false
+            },
+            {
+              "name": "batch_regex",
+              "type": "string",
+              "description": "当 batch_from_filename=TRUE 时，用于从文件名中提取 batch 的正则（第 1 个捕获组）",
+              "required": false,
+              "default": "^([^.\\-]+)",
+              "placeholder": "例如：^([^.\\-]+)"
+            }
+          ]
+        },
+        {
+          "name": "transcriptome_plot_volcano",
+          "category": "transcriptomics",
+          "redrawFunction": "transcriptome_redraw_volcano_rds",
+          "redrawParameters": [
+            { "name": "rds_file", "type": "string", "required": true, "default": "volcano.rds" },
+            { "name": "out_file", "type": "string", "required": false, "default": "volcano_redraw.pdf" },
+            { "name": "up_color", "type": "color", "required": false, "default": "#D17C5B" },
+            { "name": "down_color", "type": "color", "required": false, "default": "#5B9BD5" },
+            { "name": "nonsig_color", "type": "color", "required": false, "default": "#C0C0C0" },
+            { "name": "point_size", "type": "number", "required": false, "default": 3, "min": 0.5 },
+            { "name": "width", "type": "number", "required": false, "default": 7, "min": 1 },
+            { "name": "height", "type": "number", "required": false, "default": 6, "min": 1 },
+            { "name": "label_size", "type": "number", "required": false, "default": 3, "min": 1 }
+          ],
+          "description": "差异表达火山图（转录组）",
+          "documentation": "差异表达火山图（转录组）\n\n读取包含 Gene、logFC 及 p 值列的差异结果文件，绘制火山图；上调/下调/非显著默认配色为 #D17C5B、#5B9BD5、#C0C0C0。\n\n@param expr_file character；差异结果文件路径（须含 Gene、logFC 及 p 值列）。\n@param out_dir character；输出目录，默认 \".\"。当 output_file 仅为文件名时，输出路径为 file.path(out_dir, output_file)。\n@param pvalue_column character；p 值列名，默认 \"adj.P.Val\"。\n@param logfc_threshold numeric；|log2FC| 阈值，默认 1。\n@param pval_threshold numeric；p 值阈值，默认 0.05。\n@param output_file character；输出文件名或路径，默认 \"volcano.pdf\"。若仅为文件名则与 out_dir 拼接。\n@param width,height numeric；宽高（inch），默认 7、6。\n@param label_top_n integer；标注显著基因 top n，默认 20。\n@param color_by character；\"pval\" 或 \"direction\"。\n@param color_gradient character；p 值渐变色（color_by=\"pval\" 时）。\n@param up_color character；上调颜色，默认 \"#D17C5B\"。\n@param down_color character；下调颜色，默认 \"#5B9BD5\"。\n@param nonsig_color character；非显著颜色，默认 \"#C0C0C0\"。\n@param custom_label_genes character|NULL；自定义标注基因名。\n@param point_size numeric；散点大小，默认 3。\n@param save_rds logical；是否保存 rds 便于后续改图重绘，默认 TRUE。\n@param rds_file character；rds 文件名（与 output_file 同目录），默认 \"volcano.rds\"。\n\n@return 不可见 ggplot 对象（并写入 output_file）；若 save_rds=TRUE 则同时写入 rds。",
+          "detailedParameters": [
+            {
+              "name": "expr_file",
+              "type": "file",
+              "description": "差异结果文件路径（须含 Gene、logFC 及 p 值列）",
+              "required": true,
+              "placeholder": "请选择差异结果文件"
+            },
+            {
+              "name": "out_dir",
+              "type": "directory",
+              "description": "输出目录；当 output_file 仅为文件名时，输出路径为 out_dir + output_file",
+              "required": false,
+              "default": ".",
+              "placeholder": "请选择输出目录（默认 .）"
+            },
+            {
+              "name": "pvalue_column",
+              "type": "string",
+              "description": "p 值列名",
+              "required": false,
+              "default": "adj.P.Val",
+              "placeholder": "例如：adj.P.Val"
+            },
+            {
+              "name": "logfc_threshold",
+              "type": "number",
+              "description": "|log2FC| 阈值",
+              "required": false,
+              "default": 1
+            },
+            {
+              "name": "pval_threshold",
+              "type": "number",
+              "description": "p 值阈值",
+              "required": false,
+              "default": 0.05
+            },
+            {
+              "name": "output_file",
+              "type": "string",
+              "description": "输出文件名或路径；若仅为文件名则与 out_dir 拼接",
+              "required": false,
+              "default": "volcano.pdf",
+              "placeholder": "例如：volcano.pdf 或 03_deg_heatmap/volcano.pdf"
+            },
+            {
+              "name": "width",
+              "type": "number",
+              "description": "图宽（英寸）",
+              "required": false,
+              "default": 7,
+              "min": 1
+            },
+            {
+              "name": "height",
+              "type": "number",
+              "description": "图高（英寸）",
+              "required": false,
+              "default": 6,
+              "min": 1
+            },
+            {
+              "name": "label_top_n",
+              "type": "number",
+              "description": "标注显著基因 top n",
+              "required": false,
+              "default": 20,
+              "min": 0
+            },
+            {
+              "name": "color_by",
+              "type": "select",
+              "description": "着色方式：按 p 值渐变或按上下调方向",
+              "required": false,
+              "default": "direction",
+              "options": [
+                "pval",
+                "direction"
+              ]
+            },
+            {
+              "name": "color_gradient",
+              "type": "string",
+              "description": "p 值渐变色（color_by=\"pval\" 时，逗号分隔颜色名或十六进制）",
+              "required": false,
+              "default": "blue,green,yellow,orange,red",
+              "placeholder": "例如：blue,green,yellow,orange,red"
+            },
+            {
+              "name": "up_color",
+              "type": "color",
+              "description": "上调基因颜色",
+              "required": false,
+              "default": "#D17C5B"
+            },
+            {
+              "name": "down_color",
+              "type": "color",
+              "description": "下调基因颜色",
+              "required": false,
+              "default": "#5B9BD5"
+            },
+            {
+              "name": "nonsig_color",
+              "type": "color",
+              "description": "非显著基因颜色",
+              "required": false,
+              "default": "#C0C0C0"
+            },
+            {
+              "name": "custom_label_genes",
+              "type": "string",
+              "description": "自定义标注基因名（逗号分隔，留空则按 label_top_n 自动选）",
+              "required": false,
+              "placeholder": "例如：GENE1,GENE2,GENE3"
+            },
+            {
+              "name": "point_size",
+              "type": "number",
+              "description": "散点大小",
+              "required": false,
+              "default": 3,
+              "min": 0.5
+            },
+            {
+              "name": "save_rds",
+              "type": "boolean",
+              "description": "是否保存 rds 便于后续改图重绘",
+              "required": false,
+              "default": true
+            },
+            {
+              "name": "rds_file",
+              "type": "string",
+              "description": "rds 文件名（与 output_file 同目录）",
+              "required": false,
+              "default": "volcano.rds",
+              "placeholder": "例如：volcano.rds"
+            }
+          ]
+        },
+        {
+          "name": "transcriptome_plot_pca",
+          "category": "transcriptomics",
+          "redrawFunction": "transcriptome_redraw_pca_rds",
+          "redrawParameters": [
+            { "name": "rds_file", "type": "string", "required": true, "default": "pca.rds" },
+            { "name": "out_file", "type": "string", "required": false, "default": "pca_redraw.pdf" },
+            { "name": "title", "type": "string", "required": false },
+            { "name": "jitter_width", "type": "number", "required": false, "default": 4 },
+            { "name": "jitter_height", "type": "number", "required": false, "default": 2 },
+            { "name": "width", "type": "number", "required": false, "default": 5, "min": 1 },
+            { "name": "height", "type": "number", "required": false, "default": 3.6, "min": 1 },
+            { "name": "dpi", "type": "number", "required": false, "default": 300, "min": 72 },
+            { "name": "use_showtext", "type": "boolean", "required": false, "default": false },
+            { "name": "font_family", "type": "string", "required": false, "default": "Times" },
+            { "name": "font_path", "type": "string", "required": false }
+          ],
+          "description": "PCA 分析并绘图（适用于合并后的多数据集表达矩阵）",
+          "documentation": "PCA 分析并绘图（适用于合并后的多数据集表达矩阵）\n\n读取表达矩阵并对样本做 PCA（prcomp），输出 PC1/PC2 散点图。支持两种常见输入格式：第一列为基因名其余列为样本（带列名），或第一行以 geneNames/id 开头存放样本名（无列名）。分组信息默认从样本名中提取：取最后一个下划线 `_` 之后的部分作为分组；在多数据集 pipeline 中可用于对比批次校正前后 PCA。\n\n@param input_file character；输入表达矩阵文件路径。\n@param out_dir character；输出目录，默认 \".\"。当 out_file 仅为文件名时，输出路径为 file.path(out_dir, out_file)。\n@param out_file character；输出文件名或路径（支持 .pdf 或 .png）。若仅为文件名则与 out_dir 拼接。\n@param title character；图标题。\n@param group_extract_regex character；从样本名提取分组的正则（第1个捕获组），默认 \".*_([^_]+)$\"。\n@param group_colors character|NULL；分组颜色。NULL 使用默认色板；若为命名向量则按分组名匹配（如 c(Control=\"#D17C5B\", Disease=\"#5B9BD5\")）；若为无名向量则按分组水平顺序依次赋值。\n@param jitter_width,jitter_height numeric；点的 jitter 强度。\n@param width,height numeric；输出宽高（inch）。\n@param dpi numeric；PNG 分辨率，默认 300。\n@param use_showtext logical；是否启用 showtext，默认 FALSE。\n@param font_family character；字体族名，默认 \"Times\"。\n@param font_path character|NULL；字体文件路径（可选）。\n@param save_rds logical；是否保存 rds，默认 TRUE。\n@param rds_file character；rds 文件名，默认 \"pca.rds\"。\n\n@return 不可见 list，包含 PCA 表、ggplot 对象与 rds 路径。",
+          "detailedParameters": [
+            {
+              "name": "input_file",
+              "type": "file",
+              "description": "输入表达矩阵文件路径（支持 geneNames 首行或基因名列）",
+              "required": true,
+              "placeholder": "请选择表达矩阵文件"
+            },
+            {
+              "name": "out_dir",
+              "type": "directory",
+              "description": "输出目录；当 out_file 仅为文件名时，输出路径为 out_dir + out_file",
+              "required": false,
+              "default": ".",
+              "placeholder": "请选择输出目录（默认 .）"
+            },
+            {
+              "name": "out_file",
+              "type": "string",
+              "description": "输出文件名或路径（支持 .pdf 或 .png）；若仅为文件名则与 out_dir 拼接",
+              "required": true,
+              "default": "PCA.preNorm.pdf",
+              "placeholder": "例如：PCA.preNorm.pdf 或 results/PCA.preNorm.pdf"
+            },
+            {
+              "name": "title",
+              "type": "string",
+              "description": "图标题",
+              "required": false,
+              "placeholder": "例如：Before batch correction"
+            },
+            {
+              "name": "group_extract_regex",
+              "type": "string",
+              "description": "从样本名提取分组的正则（第 1 个捕获组）",
+              "required": false,
+              "default": ".*_([^_]+)$",
+              "placeholder": "例如：.*_([^_]+)$"
+            },
+            {
+              "name": "group_colors",
+              "type": "colorGradient",
+              "description": "分组颜色调色板（使用下方色块选择，或逗号分隔颜色名/十六进制）；若留空则使用默认色板",
+              "required": false,
+              "placeholder": "例如：#D17C5B,#5B9BD5,#FF9900"
+            },
+            {
+              "name": "jitter_width",
+              "type": "number",
+              "description": "点的水平 jitter 强度",
+              "required": false,
+              "default": 4
+            },
+            {
+              "name": "jitter_height",
+              "type": "number",
+              "description": "点的垂直 jitter 强度",
+              "required": false,
+              "default": 2
+            },
+            {
+              "name": "width",
+              "type": "number",
+              "description": "输出宽度（英寸）",
+              "required": false,
+              "default": 5,
+              "min": 1
+            },
+            {
+              "name": "height",
+              "type": "number",
+              "description": "输出高度（英寸）",
+              "required": false,
+              "default": 3.6,
+              "min": 1
+            },
+            {
+              "name": "dpi",
+              "type": "number",
+              "description": "PNG 分辨率",
+              "required": false,
+              "default": 300,
+              "min": 72
+            },
+            {
+              "name": "use_showtext",
+              "type": "boolean",
+              "description": "是否启用 showtext 解决字体",
+              "required": false,
+              "default": false
+            },
+            {
+              "name": "font_family",
+              "type": "string",
+              "description": "字体族名",
+              "required": false,
+              "default": "Times",
+              "placeholder": "例如：Times"
+            },
+            {
+              "name": "font_path",
+              "type": "file",
+              "description": "字体文件路径（use_showtext=TRUE 时可选）",
+              "required": false,
+              "placeholder": "可选：选择字体文件"
+            },
+            {
+              "name": "save_rds",
+              "type": "boolean",
+              "description": "是否保存 rds 便于后续重绘",
+              "required": false,
+              "default": true
+            },
+            {
+              "name": "rds_file",
+              "type": "string",
+              "description": "rds 文件名（与 out_file 同目录）",
+              "required": false,
+              "default": "pca.rds",
+              "placeholder": "例如：pca.rds"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

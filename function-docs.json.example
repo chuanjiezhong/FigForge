@@ -1,0 +1,72 @@
+{
+  "functions": [
+    {
+      "name": "apply_annotation_and_generate_results",
+      "package": "OmicsFlowCore",
+      "description": "应用细胞类型注释并生成分析结果",
+      "documentation": "该函数用于对单细胞数据进行细胞类型注释，并生成相应的分析结果和可视化图表。\n\n参数说明：\n- pbmc: Seurat对象，包含单细胞数据\n- cluster_annotation: 聚类注释信息\n- annCells: 注释的细胞信息\n- marker_list_by_celltype: 按细胞类型分组的标记基因列表\n- detailed_markers: 是否显示详细标记信息\n- top_n_markers: 每个细胞类型显示的前N个标记基因\n- output_prefix: 输出文件前缀\n- output_dir: 输出目录路径",
+      "examples": "apply_annotation_and_generate_results(\n  pbmc = seurat_obj,\n  cluster_annotation = cluster_info,\n  annCells = annotated_cells,\n  marker_list_by_celltype = markers,\n  output_dir = './results'\n)",
+      "detailedParameters": [
+        {
+          "name": "pbmc",
+          "type": "file",
+          "description": "Seurat对象文件路径（.rds格式）",
+          "required": true,
+          "placeholder": "请选择Seurat对象文件"
+        },
+        {
+          "name": "cluster_annotation",
+          "type": "file",
+          "description": "聚类注释文件路径",
+          "required": true,
+          "placeholder": "请选择聚类注释文件"
+        },
+        {
+          "name": "annCells",
+          "type": "file",
+          "description": "注释的细胞信息文件",
+          "required": false,
+          "placeholder": "请选择细胞信息文件"
+        },
+        {
+          "name": "marker_list_by_celltype",
+          "type": "file",
+          "description": "按细胞类型分组的标记基因列表文件",
+          "required": false,
+          "placeholder": "请选择标记基因列表文件"
+        },
+        {
+          "name": "detailed_markers",
+          "type": "boolean",
+          "description": "是否显示详细的标记基因信息",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "top_n_markers",
+          "type": "number",
+          "description": "每个细胞类型显示的前N个标记基因数量",
+          "required": false,
+          "default": 10,
+          "min": 1,
+          "max": 50
+        },
+        {
+          "name": "output_prefix",
+          "type": "string",
+          "description": "输出文件的前缀名称",
+          "required": false,
+          "default": "result",
+          "placeholder": "请输入输出文件前缀"
+        },
+        {
+          "name": "output_dir",
+          "type": "directory",
+          "description": "结果输出目录路径",
+          "required": true,
+          "placeholder": "请选择输出目录"
+        }
+      ]
+    }
+  ]
+}

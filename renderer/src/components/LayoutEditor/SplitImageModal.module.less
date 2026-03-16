@@ -1,0 +1,83 @@
+.splitModalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.splitPreview {
+  .zoomToolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+
+    .zoomSlider {
+      width: 120px;
+      margin: 0;
+    }
+
+    .zoomPercent {
+      min-width: 40px;
+      font-size: 12px;
+      color: #666;
+    }
+  }
+
+  .zoomViewport {
+    overflow: auto;
+    max-height: 380px;
+    border: 1px solid #e8e8e8;
+    border-radius: 4px;
+    background: #fafafa;
+  }
+
+  .zoomInner {
+    display: inline-block;
+  }
+
+  .splitCanvasWrap {
+    position: relative;
+    display: inline-block;
+    cursor: crosshair;
+    border: 1px solid #e8e8e8;
+    border-radius: 4px;
+    overflow: hidden;
+    background: #fafafa;
+    user-select: none;
+
+    img {
+      vertical-align: top;
+      pointer-events: none;
+    }
+  }
+
+  .regionOverlay {
+    position: absolute;
+    border: 2px solid #1677ff;
+    background: rgba(22, 119, 255, 0.15);
+    pointer-events: none;
+    box-sizing: border-box;
+  }
+
+  .regionOverlayDrawing {
+    position: absolute;
+    border: 2px dashed #1677ff;
+    background: rgba(22, 119, 255, 0.1);
+    pointer-events: none;
+    box-sizing: border-box;
+  }
+
+  .splitHint {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: #666;
+  }
+}
+
+.splitRegions {
+  .splitRegionsTitle {
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+}

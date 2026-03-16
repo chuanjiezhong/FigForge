@@ -1,0 +1,16 @@
+{
+  "localPipelinesDir": "./pipelines",
+  "externalPipelinesDirs": [
+    "/path/to/your/github/repo/pipelines",
+    "/path/to/another/repo/scripts"
+  ],
+  "gitRepositories": [
+    {
+      "url": "https://github.com/username/r-pipelines.git",
+      "branch": "main",
+      "localPath": "./external-pipelines/r-pipelines",
+      "autoUpdate": false
+    }
+  ]
+}
+

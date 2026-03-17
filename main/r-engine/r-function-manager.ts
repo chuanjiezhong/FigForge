@@ -125,8 +125,8 @@ export class RFunctionManager {
     const paramList = Object.entries(params)
       .filter(([key, v]) => key !== 'annotation_dataset_levels' && v !== undefined) // annotation_dataset_levels 仅前端可视化用，不传给 R
       .map(([key, value]) => {
-        // color_gradient / group_colors：R 端必须是 character 向量 c("blue", "green", ...)，不能是单个字符串
-        if (key === 'color_gradient' || key === 'group_colors') {
+        // color_gradient：R 端必须是 character 向量 c("blue", "green", ...)，不能是单个字符串
+        if (key === 'color_gradient') {
           let arr: string[] = []
           if (Array.isArray(value)) {
             arr = value.filter((v) => typeof v === 'string').map((v) => String(v).trim()).filter(Boolean)
@@ -136,6 +136,21 @@ export class RFunctionManager {
           if (arr.length > 0) {
             const rVec = arr.map((c) => JSON.stringify(c)).join(', ')
             return `${key} = c(${rVec})`
+          }
+        }
+        // group_colors / id_colors：使用命名向量 c(Control="#D17C5B", Disease="#5B9BD5") 或 c(StudyA="#0072B2", StudyB="#D55E00")
+        if ((key === 'group_colors' || key === 'id_colors') && value && typeof value === 'object' && !Array.isArray(value)) {
+          const entries = Object.entries(value as Record<string, string>).filter(
+            ([name, hex]) => String(name).trim() && String(hex).trim()
+          )
+          if (entries.length > 0) {
+            const parts = entries
+              .map(
+                ([name, hex]) =>
+                  `"${String(name).replace(/"/g, '\\"')}"=${JSON.stringify(String(hex).trim())}`
+              )
+              .join(', ')
+            return `${key} = c(${parts})`
           }
         }
         // annotation_colors_list 必须是 R 表达式（list(...) 或 NULL），不能写成字符串，否则 R 端无法解析

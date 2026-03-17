@@ -22,6 +22,7 @@ export type ParameterType =
   | 'text'        // 多行文本
   | 'color'       // 单色（颜色选择器，值为 hex 如 #D17C5B）
   | 'colorGradient'  // 颜色渐变（多个颜色，逗号分隔，用 Ant Design ColorPicker）
+  | 'groupColors' // 分组配色（分组标签 -> 颜色）
   | 'tags'        // 可搜索、可输入，选中后以标签显示（如比较组 contrast）
   | 'annotationColors'  // 注释列颜色：根据 contrast 等字段展示各组的颜色配置（Group 等）
 

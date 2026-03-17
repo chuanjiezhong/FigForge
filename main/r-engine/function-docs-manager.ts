@@ -15,6 +15,7 @@ export type ParameterType =
   | 'text'
   | 'color'
   | 'colorGradient'
+  | 'groupColors'
   | 'tags'
 
 export interface FunctionDocEntry {

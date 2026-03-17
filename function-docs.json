@@ -468,8 +468,8 @@
               "type": "string",
               "description": "用于筛选输入文件的正则表达式",
               "required": false,
-              "default": "\\\\.normalize\\\\.txt$",
-              "placeholder": "例如：\\\\.normalize\\\\.txt$"
+              "default": "\\.normalize\\.txt$",
+              "placeholder": "例如：\\.normalize\\.txt$"
             },
             {
               "name": "files",
@@ -699,6 +699,7 @@
             { "name": "rds_file", "type": "string", "required": true, "default": "pca.rds" },
             { "name": "out_file", "type": "string", "required": false, "default": "pca_redraw.pdf" },
             { "name": "title", "type": "string", "required": false },
+            { "name": "id_colors", "type": "groupColors", "required": false, "description": "覆盖各数据 ID 的颜色；留空则沿用 rds 中保存的颜色" },
             { "name": "jitter_width", "type": "number", "required": false, "default": 4 },
             { "name": "jitter_height", "type": "number", "required": false, "default": 2 },
             { "name": "width", "type": "number", "required": false, "default": 5, "min": 1 },
@@ -709,7 +710,7 @@
             { "name": "font_path", "type": "string", "required": false }
           ],
           "description": "PCA 分析并绘图（适用于合并后的多数据集表达矩阵）",
-          "documentation": "PCA 分析并绘图（适用于合并后的多数据集表达矩阵）\n\n读取表达矩阵并对样本做 PCA（prcomp），输出 PC1/PC2 散点图。支持两种常见输入格式：第一列为基因名其余列为样本（带列名），或第一行以 geneNames/id 开头存放样本名（无列名）。分组信息默认从样本名中提取：取最后一个下划线 `_` 之后的部分作为分组；在多数据集 pipeline 中可用于对比批次校正前后 PCA。\n\n@param input_file character；输入表达矩阵文件路径。\n@param out_dir character；输出目录，默认 \".\"。当 out_file 仅为文件名时，输出路径为 file.path(out_dir, out_file)。\n@param out_file character；输出文件名或路径（支持 .pdf 或 .png）。若仅为文件名则与 out_dir 拼接。\n@param title character；图标题。\n@param group_extract_regex character；从样本名提取分组的正则（第1个捕获组），默认 \".*_([^_]+)$\"。\n@param group_colors character|NULL；分组颜色。NULL 使用默认色板；若为命名向量则按分组名匹配（如 c(Control=\"#D17C5B\", Disease=\"#5B9BD5\")）；若为无名向量则按分组水平顺序依次赋值。\n@param jitter_width,jitter_height numeric；点的 jitter 强度。\n@param width,height numeric；输出宽高（inch）。\n@param dpi numeric；PNG 分辨率，默认 300。\n@param use_showtext logical；是否启用 showtext，默认 FALSE。\n@param font_family character；字体族名，默认 \"Times\"。\n@param font_path character|NULL；字体文件路径（可选）。\n@param save_rds logical；是否保存 rds，默认 TRUE。\n@param rds_file character；rds 文件名，默认 \"pca.rds\"。\n\n@return 不可见 list，包含 PCA 表、ggplot 对象与 rds 路径。",
+          "documentation": "PCA 分析并绘图（适用于合并后的多数据集表达矩阵）\n\n读取表达矩阵并对样本做 PCA（prcomp），输出 PC1/PC2 散点图。每个点对应一个样本，不依赖分组文件；点的颜色按「数据 ID」区分，数据 ID 由 id_extract_regex 从样本名中提取（默认取第一个下划线 _ 前的部分）。样本名格式通常为 <ID>_<...>（如 GSE165512_GSM5035106_Control）。\n\n支持两种常见输入格式：第一列为基因名其余列为样本（带列名），或第一行以 geneNames/id 开头存放样本名（无列名）。在多数据集 pipeline 中会分别对「合并未校正」与「ComBat 校正后」矩阵各画一张 PCA（前/后对比）。\n\n@param input_file character；输入表达矩阵文件路径。\n@param out_dir character；输出目录，默认 \".\"。当 out_file 仅为文件名时，输出路径为 file.path(out_dir, out_file)。\n@param out_file character；输出文件名或路径（支持 .pdf 或 .png）。若仅为文件名则与 out_dir 拼接。\n@param title character；图标题。\n@param id_extract_regex character；从样本名提取「数据 ID」的正则（第1个捕获组），用于按 ID 着色。默认 \"^([^_]+)_\"。\n@param id_colors character|NULL；各数据 ID 对应的颜色。NULL 使用默认色板；命名向量按 ID 匹配（如 c(StudyA=\"#0072B2\", StudyB=\"#D55E00\")）；无名向量按 ID 水平顺序依次赋值。\n@param jitter_width,jitter_height numeric；点的 jitter 强度。\n@param width,height numeric；输出宽高（inch）。\n@param dpi numeric；PNG 分辨率，默认 300。\n@param use_showtext logical；是否启用 showtext，默认 FALSE。\n@param font_family character；字体族名，默认 \"Times\"。\n@param font_path character|NULL；字体文件路径（可选）。\n@param save_rds logical；是否保存 rds（包含 PCA 坐标与着色 ID），默认 TRUE。\n@param rds_file character；rds 文件名，默认 \"pca.rds\"。\n\n@return 不可见 list，包含 PCA 表、ggplot 对象与 rds 路径。",
           "detailedParameters": [
             {
               "name": "input_file",
@@ -742,19 +743,19 @@
               "placeholder": "例如：Before batch correction"
             },
             {
-              "name": "group_extract_regex",
+              "name": "id_extract_regex",
               "type": "string",
-              "description": "从样本名提取分组的正则（第 1 个捕获组）",
+              "description": "从样本名提取「数据 ID」的正则（第 1 个捕获组），用于按 ID 着色",
               "required": false,
-              "default": ".*_([^_]+)$",
-              "placeholder": "例如：.*_([^_]+)$"
+              "default": "^([^_]+)_.*",
+              "placeholder": "例如：^([^_]+)_.*"
             },
             {
-              "name": "group_colors",
-              "type": "colorGradient",
-              "description": "分组颜色调色板（使用下方色块选择，或逗号分隔颜色名/十六进制）；若留空则使用默认色板",
+              "name": "id_colors",
+              "type": "groupColors",
+              "description": "各数据 ID 对应的颜色：先添加 ID 标签（如 GSE165512、StudyA），再为每个 ID 选颜色；留空则使用默认色板",
               "required": false,
-              "placeholder": "例如：#D17C5B,#5B9BD5,#FF9900"
+              "placeholder": "请在下方添加数据 ID 并选颜色"
             },
             {
               "name": "jitter_width",

@@ -354,6 +354,104 @@ function AnnotationColorsInput({ value, onChange, contrastFieldName = 'contrast'
   )
 }
 
+/** PCA 等使用的分组配色：分组标签 + 颜色，内部存储为 { groupName: hex } */
+function GroupColorsInput({ value, onChange }: { value?: Record<string, string>; onChange?: (next: Record<string, string>) => void }) {
+  const map: Record<string, string> = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  const entries = Object.entries(map)
+
+  const updateColor = (name: string, hex: string) => {
+    onChange?.({ ...map, [name]: hex })
+  }
+
+  const renameGroup = (oldName: string, newNameRaw: string) => {
+    const newName = newNameRaw.trim()
+    if (!newName || newName === oldName) return
+    if (map[newName]) return
+    const next: Record<string, string> = {}
+    Object.entries(map).forEach(([k, v]) => {
+      if (k === oldName) {
+        next[newName] = v
+      } else {
+        next[k] = v
+      }
+    })
+    onChange?.(next)
+  }
+
+  const removeGroup = (name: string) => {
+    const next: Record<string, string> = {}
+    Object.entries(map).forEach(([k, v]) => {
+      if (k !== name) next[k] = v
+    })
+    onChange?.(next)
+  }
+
+  const addGroup = () => {
+    let index = entries.length + 1
+    let name = `Group${index}`
+    while (map[name]) {
+      index += 1
+      name = `Group${index}`
+    }
+    const color = getDefaultAnnotationColor(entries.length)
+    onChange?.({ ...map, [name]: color })
+  }
+
+  return (
+    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+      <Text type="secondary" style={{ fontSize: 12 }}>
+        分组颜色（默认生成 Group1/Group2，可修改名称，再点击色块或取色器调整）
+      </Text>
+      {entries.map(([name, hex], i) => (
+        <Space key={name} align="center" wrap style={{ marginTop: 6 }}>
+          <Input
+            size="small"
+            style={{ width: 140 }}
+            defaultValue={name}
+            onBlur={(e) => renameGroup(name, e.target.value)}
+          />
+          <Space size={6}>
+            {ANNOTATION_PRESET_COLORS.map((preset) => (
+              <ColorPreviewTooltip key={preset} hex={preset}>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => updateColor(name, preset)}
+                  onKeyDown={(e) => e.key === 'Enter' && updateColor(name, preset)}
+                  style={{
+                    width: ANNOTATION_CHIP_SIZE,
+                    height: ANNOTATION_CHIP_SIZE,
+                    borderRadius: 6,
+                    backgroundColor: preset,
+                    border: hex.toLowerCase() === preset.toLowerCase() ? '2px solid #1890ff' : '1px solid #d9d9d9',
+                    cursor: 'pointer',
+                  }}
+                />
+              </ColorPreviewTooltip>
+            ))}
+          </Space>
+          <ColorPicker
+            value={hex || getDefaultAnnotationColor(i)}
+            onChange={(color) => {
+              const hexStr = color?.toHexString?.() ?? hex ?? getDefaultAnnotationColor(i)
+              updateColor(name, hexStr)
+            }}
+            showText
+            size="middle"
+            getPopupContainer={() => document.body}
+          />
+          <Button size="small" onClick={() => removeGroup(name)}>
+            删除
+          </Button>
+        </Space>
+      ))}
+      <Button size="small" type="dashed" onClick={addGroup}>
+        添加分组
+      </Button>
+    </Space>
+  )
+}
+
 /** tags 类型 Select，可选 maxItems 限制（如 contrast 最多 2 组） */
 function TagsSelectInput({
   value,
@@ -486,12 +584,46 @@ function FunctionDetail({ functionInfo, onRun, loading: _loading = false, formRe
   const [functionDescription, setFunctionDescription] = useState<string>('')
   const [examples, setExamples] = useState<string>('')
 
+  const applyParamDefaults = useCallback((params: ParameterInfo[]) => {
+    params.forEach((param) => {
+      const current = form.getFieldValue(param.name)
+      if (param.type === 'annotationColors') {
+        const normalized = current && typeof current === 'object' && !Array.isArray(current) ? current : null
+        if (!normalized || (!('group' in (normalized as any)) && !('dataset' in (normalized as any)))) {
+          form.setFieldsValue({ [param.name]: { group: {}, dataset: {} } })
+        }
+        return
+      }
+      if (param.type === 'groupColors') {
+        const isEmptyObj =
+          current == null ||
+          (typeof current === 'object' && !Array.isArray(current) && Object.keys(current as Record<string, unknown>).length === 0)
+        if (isEmptyObj) {
+          form.setFieldsValue({
+            [param.name]: {
+              Group1: getDefaultAnnotationColor(0),
+              Group2: getDefaultAnnotationColor(1),
+            },
+          })
+        }
+        return
+      }
+      if (current === undefined && param.default !== undefined) {
+        form.setFieldsValue({ [param.name]: param.default })
+      }
+    })
+  }, [form])
+
   // 分析完成后自动清空参数表单
   useEffect(() => {
     if (formResetTrigger > 0) {
       form.resetFields()
+      // resetFields 会把 groupColors 清空为 undefined/{}，这里补回默认值，保证“颜色可选且可还原”
+      if (detailedParameters.length > 0) {
+        applyParamDefaults(detailedParameters)
+      }
     }
-  }, [formResetTrigger, form])
+  }, [formResetTrigger, form, detailedParameters, applyParamDefaults])
 
   // 加载函数文档
   useEffect(() => {
@@ -526,14 +658,7 @@ function FunctionDetail({ functionInfo, onRun, loading: _loading = false, formRe
           // 使用内置的详细参数信息
           if (result.detailedParameters && Array.isArray(result.detailedParameters)) {
             setDetailedParameters(result.detailedParameters as ParameterInfo[])
-            // 设置默认值
-            ;(result.detailedParameters as ParameterInfo[]).forEach((param) => {
-              if (param.type === 'annotationColors') {
-                form.setFieldsValue({ [param.name]: { group: {}, dataset: {} } })
-              } else if (param.default !== undefined) {
-                form.setFieldsValue({ [param.name]: param.default })
-              }
-            })
+            applyParamDefaults(result.detailedParameters as ParameterInfo[])
           } else if (functionInfo.parameters) {
             // 如果没有详细参数，使用简单参数列表
             const simpleParams: ParameterInfo[] = functionInfo.parameters
@@ -703,6 +828,9 @@ function FunctionDetail({ functionInfo, onRun, loading: _loading = false, formRe
 
       case 'colorGradient':
         return <ColorGradientInput count={3} />
+
+      case 'groupColors':
+        return <GroupColorsInput />
 
       case 'annotationColors':
         return <AnnotationColorsInput contrastFieldName="contrast" />

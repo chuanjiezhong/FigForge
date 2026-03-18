@@ -5,6 +5,7 @@ import FunctionList from './components/FunctionList'
 import FunctionDetail from './components/FunctionDetail'
 import ResultView from './components/ResultView'
 import Toolbar from './components/Toolbar'
+import PipelineView from './components/PipelineView'
 import styles from './App.module.less'
 import type { RFunctionInfo } from './types/pipeline'
 import { message } from 'antd'
@@ -21,7 +22,7 @@ function App() {
   const [formResetTrigger, setFormResetTrigger] = useState(0)
   const [outputDir, setOutputDir] = useState<string | undefined>()
   const [allImages, setAllImages] = useState<string[]>([]) // 所有图片列表（包括上传的）
-  const [activeTopTab, setActiveTopTab] = useState<'functions' | 'canvas'>('functions') // 顶层 tab：functions 或 canvas
+  const [activeTopTab, setActiveTopTab] = useState<'functions' | 'pipelines' | 'canvas'>('functions') // 顶层 tab
   const [exportModalVisible, setExportModalVisible] = useState(false)
   const [exportForm] = Form.useForm()
   const [exportProgress, setExportProgress] = useState<{ progress: number; message: string } | null>(null)
@@ -521,6 +522,16 @@ function App() {
       ),
     },
     {
+      key: 'pipelines',
+      label: (
+        <span>
+          <FunctionOutlined />
+          Pipeline 流程
+        </span>
+      ),
+      children: <PipelineView />,
+    },
+    {
       key: 'canvas',
       label: (
         <span>
@@ -587,7 +598,7 @@ function App() {
           <Tabs
             activeKey={activeTopTab}
             onChange={(key) => {
-              setActiveTopTab(key as 'functions' | 'canvas')
+              setActiveTopTab(key as 'functions' | 'pipelines' | 'canvas')
               // 切换到画布视图时，如果有 outputDir 就显示，否则提示
               if (key === 'canvas' && !outputDir) {
                 message.info('请先运行分析生成图片')

@@ -223,7 +223,11 @@ export class RFunctionManager {
    */
   async runScriptFromContent(scriptContent: string, outputDir: string, fileName = 'call_function.R'): Promise<void> {
     console.log('[FigForge:r-manager] runScriptFromContent 开始')
-    this.killCurrentRun()
+    // 全局互斥：已有任务运行时不允许启动新的任务（由调用方决定是否先 cancel）
+    if (this.currentScriptProcess) {
+      console.log('[FigForge:r-manager] 已有任务在运行，拒绝启动新任务 pid=', this.currentScriptProcess?.pid)
+      throw new Error('当前有任务正在运行，请先取消或等待完成')
+    }
     this.killedByUser = false
 
     return new Promise((resolve, reject) => {
@@ -631,6 +635,61 @@ export class RFunctionManager {
       rProcess.on('error', (error) => {
         reject(error)
       })
+    })
+  }
+
+  /**
+   * 调用 R 表达式并解析 JSON 输出（stdout 必须是 JSON）
+   */
+  async evalToJson<T = unknown>(rExpression: string, packageName?: string): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const pkgName = packageName && packageName !== 'undefined' ? packageName : ''
+      const hasPackage = pkgName && pkgName.length > 0
+      const expr = rExpression.replace(/`/g, '\\`')
+
+      const rScript = `
+        if (!requireNamespace("jsonlite", quietly = TRUE)) {
+          install.packages("jsonlite", repos = "https://cran.rstudio.com/", quiet = TRUE)
+        }
+        ${hasPackage ? `
+        if (!requireNamespace("${pkgName}", quietly = TRUE)) {
+          stop(paste0("Package ${pkgName} not found"))
+        }
+        library("${pkgName}", character.only = TRUE)
+        ` : ''}
+        result <- (${expr})
+        cat(jsonlite::toJSON(result, auto_unbox = TRUE, null = "null"))
+      `
+
+      const rscriptPath = getRscriptPath()
+      const rProcess = spawn(rscriptPath, ['-e', rScript], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+
+      let output = ''
+      let errorOutput = ''
+
+      rProcess.stdout?.on('data', (data) => {
+        output += data.toString()
+      })
+
+      rProcess.stderr?.on('data', (data) => {
+        errorOutput += data.toString()
+      })
+
+      rProcess.on('close', (code) => {
+        if (code === 0) {
+          try {
+            resolve(JSON.parse(output) as T)
+          } catch (e) {
+            reject(new Error(`Failed to parse R JSON output: ${String(e)}\nraw=${output}`))
+          }
+        } else {
+          reject(new Error(`R script failed: ${errorOutput}`))
+        }
+      })
+
+      rProcess.on('error', (error) => reject(error))
     })
   }
 }

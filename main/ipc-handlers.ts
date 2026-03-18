@@ -342,6 +342,20 @@ ipcMain.handle('get-r-functions', async (_, packageName?: string, scriptPath?: s
   }
 })
 
+// Pipeline defs（用于流程图渲染）
+ipcMain.handle('get-pipeline-defs', async (_, packageName?: string) => {
+  try {
+    const pkg = packageName || 'OmicsFlowCoreFullVersion'
+    console.log('[IPC] get-pipeline-defs package=', pkg)
+    const defs = await rFunctionManager.evalToJson('transcriptome_pipeline_defs()', pkg)
+    return { success: true, defs }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('Error getting pipeline defs:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
 ipcMain.handle('call-r-function', async (
   _,
   functionName: string,
@@ -453,6 +467,13 @@ ipcMain.handle('run-r-script', (
   scriptContent: string
 ) => {
   console.log('[FigForge:main] run-r-script 收到请求, outputDir=', outputDir)
+  // 全局互斥：已有任务运行时直接拒绝，不覆盖/不取消当前任务
+  // （取消由 cancel-current-r-script 显式触发）
+  // @ts-expect-error 访问私有字段仅用于运行互斥判断（也可改成公开 isRunning 方法）
+  if ((rFunctionManager as any).currentScriptProcess) {
+    console.log('[FigForge:main] run-r-script 拒绝：已有任务在运行')
+    return { started: false, success: false, error: '当前有任务正在运行，请先取消或等待完成' }
+  }
   event.sender.once('destroyed', () => {
     console.log('[FigForge:main] webContents destroyed，调用 killCurrentRun')
     rFunctionManager.killCurrentRun()

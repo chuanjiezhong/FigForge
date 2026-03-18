@@ -833,6 +833,38 @@
               "placeholder": "例如：pca.rds"
             }
           ]
+        },
+        {
+          "name": "transcriptome_pipeline_single",
+          "category": "transcriptomics",
+          "description": "单数据集一键流程：GEO 注释 -> 标准化 -> 差异分析热图（可选火山图）",
+          "documentation": "单数据集一键流程：GEO 注释 -> 标准化 -> 差异分析热图（可选火山图）\n\n将 transcriptome_read_expr_matrix()、transcriptome_normalize_matrix()、transcriptome_plot_heatmap_limma() 串联为一键流程；运行过程中会在 out_dir/_pipeline/status/ 下写入每步状态 JSON，并在结束时写入 out_dir/_pipeline/artifacts.json 方便前端展示产物。\n\n@param probe_file,ann_file character；用于 GEO 注释的输入文件（probe + ann）。\n@param group_file character；分组文件（两列：sample, group）。\n@param out_dir character；输出根目录。\n@param prefix character；输出前缀（用于文件命名）。\n@param geo_id character|NULL；用于样本列名前缀。\n@param contrast character 长度为 2；limma 对比组。\n@param overwrite logical；是否覆盖输出文件。\n@param ... 其余参数会传递给 transcriptome_plot_heatmap_limma()。\n\n@return 不可见 list，包含每一步的结果与输出路径。",
+          "detailedParameters": [
+            { "name": "probe_file", "type": "file", "description": "probe 表/series_matrix 表达矩阵文件路径", "required": true, "placeholder": "请选择 probe 表/series_matrix 文件" },
+            { "name": "ann_file", "type": "file", "description": "注释文件路径（ann.txt）", "required": true, "placeholder": "请选择注释文件 ann.txt" },
+            { "name": "group_file", "type": "file", "description": "分组文件（两列：sample, group）", "required": true, "placeholder": "请选择分组文件" },
+            { "name": "out_dir", "type": "directory", "description": "输出根目录（会生成 01_/02_/03_ 以及 _pipeline/status）", "required": false, "default": ".", "placeholder": "请选择输出目录（默认 .）" },
+            { "name": "prefix", "type": "string", "description": "输出前缀（用于文件命名）", "required": false, "default": "single", "placeholder": "例如：GSE123456" },
+            { "name": "geo_id", "type": "string", "description": "样本列名前缀（可选，传给标准化步骤）", "required": false, "placeholder": "例如：GSE123456" },
+            { "name": "contrast", "type": "tags", "description": "limma 对比组（必须两组）", "required": true, "placeholder": "例如：Control,Disease" },
+            { "name": "overwrite", "type": "boolean", "description": "是否覆盖输出文件", "required": false, "default": false }
+          ]
+        },
+        {
+          "name": "transcriptome_pipeline_single_count",
+          "category": "transcriptomics",
+          "description": "单数据集一键流程（count）：count -> TPM -> 标准化 -> 差异分析热图（可选火山图）",
+          "documentation": "单数据集一键流程（count）：count -> TPM -> 标准化 -> 差异分析热图（可选火山图）\n\n从原始 count 矩阵出发，先计算 TPM 并写成表达矩阵文件，再完成标准化与 limma 差异热图；运行过程中会在 out_dir/_pipeline/status/ 下写入每步状态 JSON，并在结束时写入 out_dir/_pipeline/artifacts.json。\n\n@param count_file character；基因 count 矩阵文件路径。\n@param species character；物种 human/mouse。\n@param group_file character；分组文件（两列：sample, group）。\n@param out_dir character；输出根目录。\n@param prefix character；输出前缀。\n@param geo_id character|NULL；样本列名前缀（可选）。\n@param contrast character 长度为 2；limma 对比组。\n@param overwrite logical；是否覆盖输出文件。\n@param ... 其余参数会传递给 transcriptome_plot_heatmap_limma()。\n\n@return 不可见 list，包含每一步的结果与输出路径。",
+          "detailedParameters": [
+            { "name": "count_file", "type": "file", "description": "基因 count 矩阵文件（首列为基因名，后续为样本 read count）", "required": true, "placeholder": "请选择 count 矩阵文件" },
+            { "name": "species", "type": "select", "description": "物种（用于选择基因长度文件）", "required": false, "default": "human", "options": ["human", "mouse"] },
+            { "name": "group_file", "type": "file", "description": "分组文件（两列：sample, group）", "required": true, "placeholder": "请选择分组文件" },
+            { "name": "out_dir", "type": "directory", "description": "输出根目录（会生成 01_/02_/03_ 以及 _pipeline/status）", "required": false, "default": ".", "placeholder": "请选择输出目录（默认 .）" },
+            { "name": "prefix", "type": "string", "description": "输出前缀（用于文件命名）", "required": false, "default": "single_count", "placeholder": "例如：MyStudy" },
+            { "name": "geo_id", "type": "string", "description": "样本列名前缀（可选，传给标准化步骤）", "required": false, "placeholder": "例如：GSE123456" },
+            { "name": "contrast", "type": "tags", "description": "limma 对比组（必须两组）", "required": true, "placeholder": "例如：Control,Disease" },
+            { "name": "overwrite", "type": "boolean", "description": "是否覆盖输出文件", "required": false, "default": false }
+          ]
         }
       ]
     }

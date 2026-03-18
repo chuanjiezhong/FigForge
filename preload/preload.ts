@@ -89,6 +89,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getRFunctionDoc: (functionName: string, packageName?: string) =>
     ipcRenderer.invoke('get-r-function-doc', functionName, packageName),
 
+  // Pipeline defs（用于流程图渲染）
+  getPipelineDefs: (packageName?: string) =>
+    ipcRenderer.invoke('get-pipeline-defs', packageName),
+
   // 函数文档管理相关
   getFunctionDocConfig: () =>
     ipcRenderer.invoke('get-function-doc-config'),
@@ -204,6 +208,7 @@ export type ElectronAPI = {
   cancelCurrentRScript: () => Promise<{ success: boolean }>
   runRFunctionRecorded: (functionName: string, packageName: string | undefined, params: Record<string, unknown>, inputFiles: string[]) => Promise<{ success: boolean; outputDir?: string; recordId?: string; error?: string }>
   getRFunctionDoc: (functionName: string, packageName?: string) => Promise<{ success: boolean; documentation?: string; detailedParameters?: unknown[]; description?: string; examples?: string; error?: string }>
+  getPipelineDefs: (packageName?: string) => Promise<{ success: boolean; defs?: unknown; error?: string }>
   // 函数文档管理相关
   getFunctionDocConfig: () => Promise<{ success: boolean; config?: unknown; error?: string }>
   saveFunctionDoc: (functionDoc: unknown) => Promise<{ success: boolean; error?: string }>

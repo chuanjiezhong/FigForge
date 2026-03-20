@@ -23,6 +23,21 @@ export class RFunctionManager {
   private killedByUser = false
 
   /**
+   * 让打包后 Finder/GUI 启动环境也能稳定使用 UTF-8
+   * 解决：R 报 “unable to translate ... native encoding ...”
+   */
+  private getUTF8Env(): NodeJS.ProcessEnv {
+    // Windows 下 locale 行为不同，这里主要针对 macOS/Linux
+    if (process.platform === 'win32') return process.env
+    return {
+      ...process.env,
+      LANG: process.env.LANG || 'C.UTF-8',
+      LC_ALL: process.env.LC_ALL || 'C.UTF-8',
+      LC_CTYPE: process.env.LC_CTYPE || 'C.UTF-8',
+    }
+  }
+
+  /**
    * 停止当前正在运行的 R 脚本（点击取消或刷新/关闭窗口时调用）
    */
   killCurrentRun(): void {
@@ -59,6 +74,34 @@ export class RFunctionManager {
     return s.replace(/\\/g, '/').replace(/"/g, '\\"')
   }
 
+  private decodeUnicodeTokensInString(input: string): string {
+    // 兼容生产环境中出现的 "<U+XXXX>" token（例如 "<U+57FA>"）
+    // 将其还原成真实 unicode 字符，避免传参/文件名拼接出现编码错误。
+    if (!input.includes('<U+')) return input
+    return input.replace(/<U\+([0-9A-Fa-f]{4,6})>/g, (_, hex: string) => {
+      const codePoint = Number.parseInt(hex, 16)
+      if (!Number.isFinite(codePoint)) return _
+      try {
+        return String.fromCodePoint(codePoint)
+      } catch {
+        return _
+      }
+    })
+  }
+
+  private decodeUnicodeTokensDeep<T>(value: T): T {
+    if (typeof value === 'string') return this.decodeUnicodeTokensInString(value) as T
+    if (Array.isArray(value)) return value.map((v) => this.decodeUnicodeTokensDeep(v)) as T
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        out[k] = this.decodeUnicodeTokensDeep(v)
+      }
+      return out as T
+    }
+    return value
+  }
+
   private toRValue(value: unknown): string {
     if (value === undefined || value === null) return 'NULL'
     if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
@@ -66,14 +109,18 @@ export class RFunctionManager {
       if (!Number.isFinite(value)) return 'NULL'
       return String(value)
     }
-    if (typeof value === 'string') return JSON.stringify(value) // 带引号并转义
+    if (typeof value === 'string') {
+      const decoded = this.decodeUnicodeTokensInString(value)
+      return JSON.stringify(decoded) // 带引号并转义
+    }
     if (Array.isArray(value)) {
       const items = value.map((v) => this.toRValue(v)).join(', ')
       return `c(${items})`
     }
     if (typeof value === 'object') {
       // 复杂对象：转为 JSON，再用 jsonlite::fromJSON 解析成 list
-      const json = JSON.stringify(value)
+      const decoded = this.decodeUnicodeTokensDeep(value)
+      const json = JSON.stringify(decoded)
       return `jsonlite::fromJSON(${JSON.stringify(json)}, simplifyVector = FALSE)`
     }
     return 'NULL'
@@ -89,7 +136,15 @@ export class RFunctionManager {
     inputFiles: string[],
     outputDir: string
   ): string {
-    let rCode = ''
+    // 让 R 在解析 source 字符串 & 处理文件路径时使用 UTF-8
+    let rCode = `
+      # Ensure UTF-8 decoding for non-ascii file paths/params
+      try({
+        options(encoding = "UTF-8")
+        Sys.setlocale(category = "LC_ALL", locale = "C.UTF-8")
+        Sys.setlocale(category = "LC_CTYPE", locale = "C.UTF-8")
+      }, silent = TRUE)
+    `
 
     // 加载包（如果指定）
     if (packageName) {
@@ -238,12 +293,13 @@ export class RFunctionManager {
     return new Promise((resolve, reject) => {
       const fs = require('fs-extra')
       const tempScript = join(outputDir, fileName)
-      fs.writeFileSync(tempScript, scriptContent)
+      fs.writeFileSync(tempScript, scriptContent, { encoding: 'utf8' })
 
       const rscriptPath = getRscriptPath()
       const rProcess = spawn(rscriptPath, [tempScript], {
         cwd: outputDir,
         stdio: 'pipe',
+        env: this.getUTF8Env(),
       })
       this.currentScriptProcess = rProcess
       console.log('[FigForge:r-manager] R 进程已启动 pid=', rProcess.pid)
@@ -329,6 +385,7 @@ export class RFunctionManager {
       const rscriptPath = getRscriptPath()
       const rProcess = spawn(rscriptPath, ['-e', rScript], {
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: this.getUTF8Env(),
       })
 
       let output = ''
@@ -408,6 +465,7 @@ export class RFunctionManager {
       const rscriptPath = getRscriptPath()
       const rProcess = spawn(rscriptPath, ['-e', rScript], {
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: this.getUTF8Env(),
       })
 
       let output = ''
@@ -457,11 +515,13 @@ export class RFunctionManager {
 
       const rCode = this.buildFunctionCallScript(functionName, packageName, params, inputFiles, outputDir)
       
-      fs.writeFileSync(tempScript, rCode)
+      fs.writeFileSync(tempScript, rCode, 'utf8')
       
-      const rProcess = spawn('Rscript', [tempScript], {
+      const rscriptPath = getRscriptPath()
+      const rProcess = spawn(rscriptPath, [tempScript], {
         cwd: outputDir,
         stdio: 'pipe',
+        env: this.getUTF8Env(),
       })
 
       let errorOutput = ''
@@ -610,6 +670,7 @@ export class RFunctionManager {
       const rscriptPath = getRscriptPath()
       const rProcess = spawn(rscriptPath, ['-e', rScript], {
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: this.getUTF8Env(),
       })
 
       let output = ''
@@ -669,6 +730,7 @@ export class RFunctionManager {
       const rscriptPath = getRscriptPath()
       const rProcess = spawn(rscriptPath, ['-e', rScript], {
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: this.getUTF8Env(),
       })
 
       let output = ''

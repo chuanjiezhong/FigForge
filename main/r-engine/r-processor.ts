@@ -50,8 +50,18 @@ export class RProcessor extends EventEmitter {
 
     // 启动 Rscript 进程（使用解析后的路径，打包后从 Finder 启动时 PATH 可能不含 R）
     const rscriptPath = getRscriptPath()
+    // macOS/Linux：GUI 启动时 locale 可能不是 UTF-8，导致 R 无法正确解码中文路径
+    const env = process.platform === 'win32'
+      ? process.env
+      : {
+          ...process.env,
+          LANG: process.env.LANG || 'C.UTF-8',
+          LC_ALL: process.env.LC_ALL || 'C.UTF-8',
+          LC_CTYPE: process.env.LC_CTYPE || 'C.UTF-8',
+        }
     const rProcess = spawn(rscriptPath, [scriptPath, paramsPath, outputDir], {
       cwd: pipelineDir,
+      env,
     })
 
     this.processes.set(jobId, rProcess)

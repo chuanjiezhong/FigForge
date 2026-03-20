@@ -20,6 +20,29 @@ type PipelineStepDef = {
 
 type PipelineDefs = Record<string, { pipeline_name: string; steps: PipelineStepDef[] }>
 
+const UNICODE_TOKEN_RE = /<U\+([0-9A-Fa-f]{4,6})>/g
+function decodeUnicodeTokensInString(input: string): string {
+  if (!input.includes('<U+')) return input
+  return input.replace(UNICODE_TOKEN_RE, (_, hex: string) => {
+    const codePoint = Number.parseInt(hex, 16)
+    if (!Number.isFinite(codePoint)) return _
+    return String.fromCodePoint(codePoint)
+  })
+}
+
+function decodeUnicodeTokensDeep<T>(value: T): T {
+  if (typeof value === 'string') return decodeUnicodeTokensInString(value) as T
+  if (Array.isArray(value)) return value.map((v) => decodeUnicodeTokensDeep(v)) as T
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = decodeUnicodeTokensDeep(v)
+    }
+    return out as T
+  }
+  return value
+}
+
 function asArray(x: string | string[] | undefined): string[] {
   if (!x) return []
   return Array.isArray(x) ? x : [x]
@@ -369,7 +392,9 @@ export default function PipelineView() {
             message.error(res?.error || '获取 pipeline 定义失败')
             return
           }
-          setDefs(res.defs as PipelineDefs)
+          // 兼容生产环境出现的 unicode token：将 "<U+XXXX>" 还原为真实字符
+          const decoded = decodeUnicodeTokensDeep(res.defs) as PipelineDefs
+          setDefs(decoded)
         })
         .finally(() => !cancelled && setLoading(false))
     } catch (e) {

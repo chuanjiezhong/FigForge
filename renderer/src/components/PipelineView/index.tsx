@@ -79,6 +79,11 @@ type DatasetItem = {
   // count
   count_file?: string
   species?: 'human' | 'mouse'
+  // 可选：GeneID -> Symbol 转换（count / tpm / expr 均支持）
+  // 后端触发逻辑：当 annot_file 存在时会进行转换（除非显式传入 do_convert_geneid=FALSE）
+  annot_file?: string
+  geneid_col?: string
+  symbol_col?: string
   // tpm/expr
   file?: string
   // geo
@@ -86,49 +91,40 @@ type DatasetItem = {
   ann_file?: string
 }
 
-function DatasetFileField({
-  label,
-  namePath,
-  placeholder,
-  required,
-}: {
-  label: string
-  namePath: (string | number)[]
-  placeholder: string
-  required?: boolean
-}) {
-  const form = Form.useFormInstance()
+/** 与 SharedParameterForm 的 FilePickerInput 一致：由 Form.Item 注入 value/onChange，选文件后调用 onChange 即可回显 */
+function DatasetFilePicker({ value, onChange, placeholder }: { value?: string; onChange?: (v: string) => void; placeholder: string }) {
   return (
-    <Form.Item
-      label={label}
-      name={namePath as any}
-      rules={required ? [{ required: true, message: `请选择${label}` }] : undefined}
-    >
-      <Space.Compact style={{ width: '100%' }}>
-        <Input readOnly placeholder={placeholder} />
-        <Button
-          onClick={async () => {
-            const files = await window.electronAPI.selectFiles({ filters: [{ name: 'All Files', extensions: ['*'] }] })
-            if (files && files.length > 0) {
-              form.setFieldValue(namePath as any, files[0])
-            }
-          }}
-        >
-          选择
-        </Button>
-      </Space.Compact>
-    </Form.Item>
+    <Space.Compact style={{ width: '100%' }}>
+      <Input readOnly placeholder={placeholder} value={value} />
+      <Button
+        onClick={async () => {
+          const files = await window.electronAPI.selectFiles({ filters: [{ name: 'All Files', extensions: ['*'] }] })
+          if (files && files.length > 0) onChange?.(files[0])
+        }}
+      >
+        选择
+      </Button>
+    </Space.Compact>
   )
 }
 
-function DatasetsBuilder({ form }: { form: any }) {
+function DatasetsBuilder({
+  form,
+  mode = 'any',
+}: {
+  form: any
+  mode?: 'any' | 'geoOnly'
+}) {
   const datasets = (Form.useWatch('datasets', form) as DatasetItem[] | undefined) ?? []
+  const geoOnly = mode === 'geoOnly'
 
   return (
     <div style={{ marginBottom: 12 }}>
       <Text strong>datasets（多数据集输入）</Text>
       <div className={styles.hint}>
-        支持混合输入：count 会先转换 TPM；tpm/expr 直接使用；geo 先注释生成表达矩阵。每个数据集都需要 group_file。
+        {geoOnly
+          ? '当前流程仅支持 GEO 数据集：每个数据集需要 probe_file、ann_file、group_file。'
+          : '支持混合输入：count 会先转换 TPM（如提供 annot_file 会先做 GeneID->Symbol）；tpm/expr 先读取表达矩阵（如提供 annot_file 也会把行名当作 GeneID->Symbol 转换）；geo 先注释生成表达矩阵。每个数据集都需要 group_file。'}
       </div>
       <Form.List name="datasets">
         {(fields, { add, remove }) => (
@@ -146,21 +142,27 @@ function DatasetsBuilder({ form }: { form: any }) {
                     </Button>
                   }
                 >
-                  <Form.Item
-                    label="type"
-                    name={[field.name, 'type']}
-                    rules={[{ required: true, message: '请选择 type' }]}
-                    initialValue={t || 'expr'}
-                  >
-                    <Select
-                      options={[
-                        { label: 'count（原始计数）', value: 'count' },
-                        { label: 'tpm（已是 TPM）', value: 'tpm' },
-                        { label: 'expr（表达矩阵）', value: 'expr' },
-                        { label: 'geo（probe+ann 注释）', value: 'geo' },
-                      ]}
-                    />
-                  </Form.Item>
+                  {geoOnly ? (
+                    <Form.Item name={[field.name, 'type']} initialValue="geo" hidden>
+                      <Input />
+                    </Form.Item>
+                  ) : (
+                    <Form.Item
+                      label="type"
+                      name={[field.name, 'type']}
+                      rules={[{ required: true, message: '请选择 type' }]}
+                      initialValue={t || 'expr'}
+                    >
+                      <Select
+                        options={[
+                          { label: 'count（原始计数）', value: 'count' },
+                          { label: 'tpm（已是 TPM）', value: 'tpm' },
+                          { label: 'expr（表达矩阵）', value: 'expr' },
+                          { label: 'geo（probe+ann 注释）', value: 'geo' },
+                        ]}
+                      />
+                    </Form.Item>
+                  )}
 
                   <Form.Item label="prefix" name={[field.name, 'prefix']} tooltip="用于输出文件命名（可选）">
                     <Input placeholder="例如：ds1" />
@@ -170,50 +172,80 @@ function DatasetsBuilder({ form }: { form: any }) {
                     <Input placeholder="例如：GSE123456" />
                   </Form.Item>
 
-                  <DatasetFileField
+                  <Form.Item
                     label="group_file"
-                    namePath={[field.name, 'group_file']}
-                    placeholder="分组文件（两列：sample, group）"
-                    required
-                  />
+                    name={[field.name, 'group_file']}
+                    rules={[{ required: true, message: '请选择 group_file' }]}
+                  >
+                    <DatasetFilePicker placeholder="分组文件（两列：sample, group）" />
+                  </Form.Item>
 
-                  {t === 'count' && (
+                  {!geoOnly && t === 'count' && (
                     <>
-                      <DatasetFileField
+                      <Form.Item
                         label="count_file"
-                        namePath={[field.name, 'count_file']}
-                        placeholder="count 矩阵文件（首列基因，后续样本 count）"
-                        required
-                      />
+                        name={[field.name, 'count_file']}
+                        rules={[{ required: true, message: '请选择 count_file' }]}
+                      >
+                        <DatasetFilePicker placeholder="count 矩阵文件（首列为基因ID/基因名列；后续为样本count；如需转换请确保列名=geneid_col）" />
+                      </Form.Item>
                       <Form.Item label="species" name={[field.name, 'species']} initialValue="human" rules={[{ required: true, message: '请选择 species' }]}>
                         <Select options={[{ label: 'human', value: 'human' }, { label: 'mouse', value: 'mouse' }]} />
                       </Form.Item>
+
+                      <Form.Item label="annot_file（可选：GeneID->Symbol）" name={[field.name, 'annot_file']} tooltip="若你的 count 首列是 GeneID（非 Symbol），填写注释表用于自动转换。否则留空。">
+                        <DatasetFilePicker placeholder="注释文件（包含 geneid_col 与 symbol_col 两列）" />
+                      </Form.Item>
+                      <Space size="small" style={{ width: '100%' }}>
+                        <Form.Item label="geneid_col（可选）" name={[field.name, 'geneid_col']} style={{ flex: 1 }}>
+                          <Input placeholder="默认 GeneID" />
+                        </Form.Item>
+                        <Form.Item label="symbol_col（可选）" name={[field.name, 'symbol_col']} style={{ flex: 1 }}>
+                          <Input placeholder="默认 Symbol" />
+                        </Form.Item>
+                      </Space>
                     </>
                   )}
 
-                  {(t === 'tpm' || t === 'expr' || !t) && (
-                    <DatasetFileField
-                      label="file"
-                      namePath={[field.name, 'file']}
-                      placeholder="表达矩阵文件（首列基因名）"
-                      required
-                    />
+                  {!geoOnly && (t === 'tpm' || t === 'expr' || !t) && (
+                    <>
+                      <Form.Item
+                        label="file"
+                        name={[field.name, 'file']}
+                        rules={[{ required: true, message: '请选择 file' }]}
+                      >
+                        <DatasetFilePicker placeholder="表达矩阵文件（首列为基因名/基因ID；后续为样本表达值；如需转换请确保列名=geneid_col）" />
+                      </Form.Item>
+                      <Form.Item label="annot_file（可选：GeneID->Symbol）" name={[field.name, 'annot_file']} tooltip="若你的表达矩阵首列是 GeneID（非 Symbol），填写注释表用于自动转换；否则留空。">
+                        <DatasetFilePicker placeholder="注释文件（包含 geneid_col 与 symbol_col 两列）" />
+                      </Form.Item>
+                      <Space size="small" style={{ width: '100%' }}>
+                        <Form.Item label="geneid_col（可选）" name={[field.name, 'geneid_col']} style={{ flex: 1 }}>
+                          <Input placeholder="默认 GeneID" />
+                        </Form.Item>
+                        <Form.Item label="symbol_col（可选）" name={[field.name, 'symbol_col']} style={{ flex: 1 }}>
+                          <Input placeholder="默认 Symbol" />
+                        </Form.Item>
+                      </Space>
+                    </>
                   )}
 
-                  {t === 'geo' && (
+                  {(geoOnly || t === 'geo') && (
                     <>
-                      <DatasetFileField
+                      <Form.Item
                         label="probe_file"
-                        namePath={[field.name, 'probe_file']}
-                        placeholder="probe/series_matrix 文件"
-                        required
-                      />
-                      <DatasetFileField
+                        name={[field.name, 'probe_file']}
+                        rules={[{ required: true, message: '请选择 probe_file' }]}
+                      >
+                        <DatasetFilePicker placeholder="probe/series_matrix 文件" />
+                      </Form.Item>
+                      <Form.Item
                         label="ann_file"
-                        namePath={[field.name, 'ann_file']}
-                        placeholder="注释文件 ann.txt"
-                        required
-                      />
+                        name={[field.name, 'ann_file']}
+                        rules={[{ required: true, message: '请选择 ann_file' }]}
+                      >
+                        <DatasetFilePicker placeholder="注释文件 ann.txt" />
+                      </Form.Item>
                     </>
                   )}
                 </Card>
@@ -222,7 +254,7 @@ function DatasetsBuilder({ form }: { form: any }) {
 
             <Button
               type="dashed"
-              onClick={() => add({ type: 'expr', prefix: `ds${fields.length + 1}` })}
+              onClick={() => add({ type: geoOnly ? 'geo' : 'expr', prefix: `ds${fields.length + 1}` })}
               block
             >
               添加数据集
@@ -351,9 +383,28 @@ export default function PipelineView() {
     }
   }, [])
 
+  // multi / multi_any：切换时立即初始化 datasets 为 []，否则 Form.List「添加数据集」不生效
+  useEffect(() => {
+    if (pipelineName === 'transcriptome_pipeline_multi' || pipelineName === 'transcriptome_pipeline_multi_any') {
+      const cur = globalForm.getFieldValue('datasets')
+      if (!Array.isArray(cur)) globalForm.setFieldsValue({ datasets: [] })
+    }
+  }, [pipelineName, globalForm])
+
   // 选择 pipeline 后：默认选中第一个 step，并加载 pipeline 自身参数
   useEffect(() => {
+    // 先清空选中 step，避免切换 pipeline 时短暂显示旧步骤参数
+    setSelectedStepId(null)
     if (steps.length > 0) setSelectedStepId(steps[0].step_id)
+    // 切换流程类型时：清空右侧“全局参数”和“步骤参数覆盖”
+    // 避免上一个 pipeline 的字段/覆盖值残留到当前 pipeline。
+    globalForm.resetFields()
+    if (pipelineName === 'transcriptome_pipeline_multi' || pipelineName === 'transcriptome_pipeline_multi_any') {
+      // resetFields 会把 datasets 字段清掉，因此需要显式重新初始化
+      globalForm.setFieldsValue({ datasets: [] })
+    }
+    setStepOverrides({})
+    setStepDocs({})
     setStepStatusMap({})
     setRunOutputDir(null)
     setStatusDir(null)
@@ -370,7 +421,7 @@ export default function PipelineView() {
     }
     loadPipelineDoc().catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pipelineName])
+  }, [pipelineName, globalForm])
 
   // 仅在 steps 变化时 fitView 一次，避免运行中视图跳动
   useEffect(() => {
@@ -455,21 +506,79 @@ export default function PipelineView() {
     if (!selectedStep) return []
     const base = stepDocs[selectedStep.step_id] ?? []
     if (!overridableParams) return base
-    return base.filter((p) => overridableParams.has(p.name))
-  }, [selectedStep, stepDocs, overridableParams])
+    let list = base.filter((p) => overridableParams.has(p.name))
+    // multi 流程下 01 的输入来自 datasets，步骤里不展示 probe_file/ann_file 避免重复
+    if (
+      (pipelineName === 'transcriptome_pipeline_multi' && selectedStep.step_id === '01_geo_annotation') ||
+      (pipelineName === 'transcriptome_pipeline_multi_any' && selectedStep.step_id === '01_input_prepare')
+    ) {
+      list = list.filter((p) => p.name !== 'probe_file' && p.name !== 'ann_file')
+    }
+    return list
+  }, [selectedStep, stepDocs, overridableParams, pipelineName])
 
   const pipelineParams: ParameterInfo[] = useMemo(() => {
     const base = globalDocs[pipelineName] ?? []
     // config 与 ... 不在面板里直接展示（config 由流程图节点生成）
-    // multi_any 的 datasets 用专用构建器渲染
-    return base.filter((p) => p.name !== 'config' && p.name !== '...' && !(pipelineName === 'transcriptome_pipeline_multi_any' && p.name === 'datasets'))
+    // multi_any / multi 的 datasets 用专用构建器渲染
+    const filtered = base.filter(
+      (p) =>
+        p.name !== 'config' &&
+        p.name !== '...' &&
+        !(
+          (pipelineName === 'transcriptome_pipeline_multi_any' || pipelineName === 'transcriptome_pipeline_multi') &&
+          p.name === 'datasets'
+        )
+    )
+
+    // 如果函数文档没拿到 detailedParameters，multi/multi_any 可能导致 filtered 为空。
+    // 这里用已知的 R 函数签名做一个兜底，保证默认参数能渲染出来。
+    if (filtered.length > 0) return filtered
+
+    if (pipelineName === 'transcriptome_pipeline_multi_any') {
+      return [
+        { name: 'out_dir', type: 'directory', default: '.', description: '输出根目录（会生成 01_/02_/... 以及 _pipeline/status）' },
+        { name: 'merge_prefix', type: 'string', default: 'merge_any', description: '合并结果文件前缀' },
+        { name: 'batch_from_filename', type: 'boolean', default: true, description: '是否从文件名提取 batch（传递给合并函数）' },
+        {
+          name: 'contrast',
+          type: 'tags',
+          required: true,
+          default: ['Control', 'Disease'],
+          options: ['Control', 'Disease'],
+          description: 'limma 对比组（必须两组）',
+        },
+        { name: 'overwrite', type: 'boolean', default: false, description: '是否覆盖输出文件' },
+        { name: 'do_combat', type: 'boolean', default: true, description: '是否做 ComBat 批次校正' },
+      ]
+    }
+
+    if (pipelineName === 'transcriptome_pipeline_multi') {
+      return [
+        { name: 'out_dir', type: 'directory', default: '.', description: '输出根目录（会生成 01_/02_/... 以及 _pipeline/status）' },
+        { name: 'merge_prefix', type: 'string', default: 'merge', description: '合并结果文件前缀' },
+        { name: 'batch_from_filename', type: 'boolean', default: true, description: '是否从文件名提取 batch（传递给合并函数）' },
+        {
+          name: 'contrast',
+          type: 'tags',
+          required: true,
+          default: ['Control', 'Disease'],
+          options: ['Control', 'Disease'],
+          description: 'limma 对比组（必须两组）',
+        },
+        { name: 'overwrite', type: 'boolean', default: false, description: '是否覆盖输出文件' },
+        { name: 'do_combat', type: 'boolean', default: true, description: '是否做 ComBat 批次校正' },
+      ]
+    }
+
+    return filtered
   }, [globalDocs, pipelineName])
 
   const handleRun = async () => {
     try {
       if (running) return
       const globalValues = await globalForm.validateFields()
-      if (pipelineName === 'transcriptome_pipeline_multi_any') {
+      if (pipelineName === 'transcriptome_pipeline_multi_any' || pipelineName === 'transcriptome_pipeline_multi') {
         const ds = (globalValues as any)?.datasets as DatasetItem[] | undefined
         if (!Array.isArray(ds) || ds.length === 0) {
           message.error('请先在 datasets 中至少添加 1 个数据集')
@@ -509,10 +618,36 @@ export default function PipelineView() {
           : gen.outputDir
 
       setRunOutputDir(baseOut)
-      setStatusDir(`${baseOut.replace(/\\/g, '/')}/_pipeline/status`)
+      const statusDirPath = `${baseOut.replace(/\\/g, '/')}/_pipeline/status`
+      setStatusDir(statusDirPath)
 
-      const cleanup = window.electronAPI.onRunRScriptResult?.((result) => {
+      const cleanup = window.electronAPI.onRunRScriptResult?.(async (result) => {
         cleanup?.()
+        // 结束前拉取一次 status，确保失败的那一步被标红并选中
+        try {
+          const list = await window.electronAPI.listFiles(statusDirPath, { extensions: ['json'], recursive: false })
+          if (list.success && Array.isArray(list.files)) {
+            const nextMap: Record<string, StepStatus> = {}
+            for (const f of list.files) {
+              const read = await window.electronAPI.readFile(f)
+              if (read.success && read.content) {
+                try {
+                  const parsed = JSON.parse(read.content) as StepStatus
+                  if (parsed?.step_id) nextMap[parsed.step_id] = parsed
+                } catch {
+                  /* ignore */
+                }
+              }
+            }
+            if (Object.keys(nextMap).length > 0) {
+              setStepStatusMap(nextMap)
+              const failedStep = steps.find((s) => nextMap[s.step_id]?.status === 'failed')
+              if (failedStep) setSelectedStepId(failedStep.step_id)
+            }
+          }
+        } catch {
+          /* ignore */
+        }
         setRunning(false)
         if (result.success && result.outputDir) {
           message.success(`Pipeline 运行完成：${baseOut}`)
@@ -597,13 +732,18 @@ export default function PipelineView() {
 
         <div className={styles.panel}>
           <Card size="small" title="全局参数（Pipeline 入参）">
-            {pipelineParams.length === 0 ? (
+            {pipelineParams.length === 0 &&
+            pipelineName !== 'transcriptome_pipeline_multi' &&
+            pipelineName !== 'transcriptome_pipeline_multi_any' ? (
               <div className={styles.hint}>暂无可配置全局参数</div>
             ) : (
               <>
-                <ParameterForm form={globalForm} parameters={pipelineParams} />
-                {pipelineName === 'transcriptome_pipeline_multi_any' && (
-                  <DatasetsBuilder form={globalForm} />
+                {pipelineParams.length > 0 && <ParameterForm form={globalForm} parameters={pipelineParams} />}
+                {(pipelineName === 'transcriptome_pipeline_multi_any' || pipelineName === 'transcriptome_pipeline_multi') && (
+                  <Form form={globalForm} layout="vertical" style={{ marginTop: 8 }}>
+                    {pipelineName === 'transcriptome_pipeline_multi_any' && <DatasetsBuilder form={globalForm} mode="any" />}
+                    {pipelineName === 'transcriptome_pipeline_multi' && <DatasetsBuilder form={globalForm} mode="geoOnly" />}
+                  </Form>
                 )}
               </>
             )}
@@ -623,6 +763,12 @@ export default function PipelineView() {
               <div className={styles.hint}>该步骤暂无可覆盖参数（或尚未加载参数定义）</div>
             ) : (
               <>
+                {(pipelineName === 'transcriptome_pipeline_multi' && selectedStep.step_id === '01_geo_annotation') ||
+                (pipelineName === 'transcriptome_pipeline_multi_any' && selectedStep.step_id === '01_input_prepare') ? (
+                  <div className={styles.hint} style={{ marginBottom: 8 }}>
+                    本步输入来自上方「datasets」中每个数据集的 probe_file、ann_file 等；此处仅可覆盖 out_dir、prefix、overwrite 等。
+                  </div>
+                ) : null}
                 <div style={{ marginBottom: 8 }}>
                   <Text type="secondary">{selectedStep.name}</Text>
                 </div>

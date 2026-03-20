@@ -846,7 +846,7 @@
             { "name": "out_dir", "type": "directory", "description": "输出根目录（会生成 01_/02_/03_ 以及 _pipeline/status）", "required": false, "default": ".", "placeholder": "请选择输出目录（默认 .）" },
             { "name": "prefix", "type": "string", "description": "输出前缀（用于文件命名）", "required": false, "default": "single", "placeholder": "例如：GSE123456" },
             { "name": "geo_id", "type": "string", "description": "样本列名前缀（可选，传给标准化步骤）", "required": false, "placeholder": "例如：GSE123456" },
-            { "name": "contrast", "type": "tags", "description": "limma 对比组（必须两组）", "required": true, "placeholder": "例如：Control,Disease" },
+            { "name": "contrast", "type": "tags", "description": "limma 对比组（必须两组）", "required": true, "default": ["Control", "Disease"], "placeholder": "例如：Control,Disease" },
             { "name": "overwrite", "type": "boolean", "description": "是否覆盖输出文件", "required": false, "default": false }
           ]
         },
@@ -856,14 +856,30 @@
           "description": "单数据集一键流程（count）：count -> TPM -> 标准化 -> 差异分析热图（可选火山图）",
           "documentation": "单数据集一键流程（count）：count -> TPM -> 标准化 -> 差异分析热图（可选火山图）\n\n从原始 count 矩阵出发，先计算 TPM 并写成表达矩阵文件，再完成标准化与 limma 差异热图；运行过程中会在 out_dir/_pipeline/status/ 下写入每步状态 JSON，并在结束时写入 out_dir/_pipeline/artifacts.json。\n\n@param count_file character；基因 count 矩阵文件路径。\n@param species character；物种 human/mouse。\n@param group_file character；分组文件（两列：sample, group）。\n@param out_dir character；输出根目录。\n@param prefix character；输出前缀。\n@param geo_id character|NULL；样本列名前缀（可选）。\n@param contrast character 长度为 2；limma 对比组。\n@param overwrite logical；是否覆盖输出文件。\n@param ... 其余参数会传递给 transcriptome_plot_heatmap_limma()。\n\n@return 不可见 list，包含每一步的结果与输出路径。",
           "detailedParameters": [
-            { "name": "count_file", "type": "file", "description": "基因 count 矩阵文件（首列为基因名，后续为样本 read count）", "required": true, "placeholder": "请选择 count 矩阵文件" },
+            { "name": "count_file", "type": "file", "description": "基因 count 矩阵文件（首列为基因名或 GeneID，后续为样本 read count）", "required": true, "placeholder": "请选择 count 矩阵文件" },
+            { "name": "annot_file", "type": "file", "description": "GeneID 注释文件（含 GeneID 与 Symbol 列，用于首步「ID → Symbol」转换；不填则跳过该步）", "required": false, "placeholder": "可选：选择注释文件以启用 ID 转换" },
+            { "name": "do_convert_geneid", "type": "boolean", "description": "是否执行「count 基因 ID → Symbol」转换。若 count 首列为 GeneID（Ensembl/NCBI），必须勾选并选择 annot_file，否则 TPM 会报「没有交集基因」", "required": false, "default": false },
             { "name": "species", "type": "select", "description": "物种（用于选择基因长度文件）", "required": false, "default": "human", "options": ["human", "mouse"] },
             { "name": "group_file", "type": "file", "description": "分组文件（两列：sample, group）", "required": true, "placeholder": "请选择分组文件" },
             { "name": "out_dir", "type": "directory", "description": "输出根目录（会生成 01_/02_/03_ 以及 _pipeline/status）", "required": false, "default": ".", "placeholder": "请选择输出目录（默认 .）" },
             { "name": "prefix", "type": "string", "description": "输出前缀（用于文件命名）", "required": false, "default": "single_count", "placeholder": "例如：MyStudy" },
             { "name": "geo_id", "type": "string", "description": "样本列名前缀（可选，传给标准化步骤）", "required": false, "placeholder": "例如：GSE123456" },
-            { "name": "contrast", "type": "tags", "description": "limma 对比组（必须两组）", "required": true, "placeholder": "例如：Control,Disease" },
+            { "name": "contrast", "type": "tags", "description": "limma 对比组（必须两组）", "required": true, "default": ["Control", "Disease"], "placeholder": "例如：Control,Disease" },
             { "name": "overwrite", "type": "boolean", "description": "是否覆盖输出文件", "required": false, "default": false }
+          ]
+        },
+        {
+          "name": "transcriptome_pipeline_multi",
+          "category": "transcriptomics",
+          "description": "多数据集 GEO 流程：GEO 注释 -> 逐数据集标准化 -> 合并+ComBat -> PCA -> 差异热图",
+          "documentation": "多数据集 GEO 流程。每个数据集需 probe_file、ann_file、group_file；输出写入 out_dir。",
+          "detailedParameters": [
+            { "name": "out_dir", "type": "directory", "description": "输出根目录（会生成 01_/02_/... 及 _pipeline/status）", "required": false, "default": ".", "placeholder": "请选择输出目录" },
+            { "name": "merge_prefix", "type": "string", "description": "合并结果文件前缀", "required": false, "default": "merge", "placeholder": "例如：merge" },
+            { "name": "batch_from_filename", "type": "boolean", "description": "是否从文件名提取 batch（ComBat）", "required": false, "default": true },
+            { "name": "contrast", "type": "tags", "description": "limma 对比组（必须两组）", "required": true, "default": ["Control", "Disease"], "placeholder": "例如：Control,Disease" },
+            { "name": "overwrite", "type": "boolean", "description": "是否覆盖输出文件", "required": false, "default": false },
+            { "name": "do_combat", "type": "boolean", "description": "是否做 ComBat 批次校正", "required": false, "default": true }
           ]
         }
       ]

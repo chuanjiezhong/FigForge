@@ -36,4 +36,5 @@ external-pipelines/
 # Environment
 .env
 .env.local
+.yarn
 

@@ -153,6 +153,11 @@ export class RFunctionManager {
             return `${key} = c(${parts})`
           }
         }
+        // datasets：必须是 list of lists，不能用 c(list(), list())（R 会合并成单个 list 导致 $ 报错）
+        if (key === 'datasets' && Array.isArray(value)) {
+          const json = JSON.stringify(value)
+          return `${key} = jsonlite::fromJSON(${JSON.stringify(json)}, simplifyVector = FALSE)`
+        }
         // annotation_colors_list 必须是 R 表达式（list(...) 或 NULL），不能写成字符串，否则 R 端无法解析
         if (key === 'annotation_colors_list') {
           if (value === null || value === undefined) return `${key} = NULL`
@@ -505,14 +510,14 @@ export class RFunctionManager {
           man_dir <- file.path(pkg_path, "man")
           
           # 查找对应的 Rd 文件（可能包含函数名或别名）
-          rd_files <- list.files(man_dir, pattern = "\\.Rd$", full.names = TRUE)
+          rd_files <- list.files(man_dir, pattern = paste0("\\\\\\\\", ".", "Rd$"), full.names = TRUE)
           target_file <- NULL
           
           for (rd_file in rd_files) {
             rd_content <- readLines(rd_file, warn = FALSE, n = 50)
-            # 检查是否包含函数名（检查 \\alias{functionName} 或 \\name{functionName}）
-            if (any(grepl(paste0("\\\\alias\\{", "${functionName}", "\\}"), rd_content)) || 
-                any(grepl(paste0("\\\\name\\{", "${functionName}", "\\}"), rd_content))) {
+            pat_alias <- paste0("\\\\\\\\", "alias", "\\\\\\\\", "{", "${functionName}", "\\\\\\\\", "}")
+            pat_name <- paste0("\\\\\\\\", "name", "\\\\\\\\", "{", "${functionName}", "\\\\\\\\", "}")
+            if (any(grepl(pat_alias, rd_content)) || any(grepl(pat_name, rd_content))) {
               target_file <- rd_file
               break
             }

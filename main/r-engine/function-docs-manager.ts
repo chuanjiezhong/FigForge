@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
+import { extractFile } from '@electron/asar'
 
 /**
  * 函数文档配置
@@ -211,7 +212,9 @@ export class FunctionDocsManager {
       if (typeof require !== 'undefined') {
         const { app } = require('electron')
         if (app && app.isPackaged) {
-          return join(app.getAppPath(), 'app.asar', 'function-docs.json')
+          // 打包后 app.asar 在 Resources 目录下，优先使用 resourcesPath。
+          // app.getAppPath() 在不同构建器/打包场景下可能不一致。
+          return join(process.resourcesPath, 'app.asar')
         }
       }
     } catch {
@@ -221,11 +224,34 @@ export class FunctionDocsManager {
   }
 
   /**
+   * 打包后：从 app.asar 中直接读取 function-docs.json
+   * @returns FunctionDocConfig 或 null
+   */
+  private loadBundledConfigFromAsar(): FunctionDocConfig | null {
+    try {
+      const asarPath = this.getBundledConfigPath()
+      if (!asarPath) return null
+      if (!existsSync(asarPath)) return null
+      // 从归档中抽取文件内容（同步）
+      const buf = extractFile(asarPath, 'function-docs.json')
+      if (!buf || (buf as any).length === 0) return null
+      const content = (buf as Buffer).toString('utf-8')
+      return this.normalizeConfig(JSON.parse(content))
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * 加载函数文档配置
    * 打包后：若 userData 里没有有效配置（空或不存在），则回退到内置 function-docs.json
    */
   loadConfig(): FunctionDocConfig {
     try {
+      // 生产/打包后：从 app.asar 内置读取，确保每次都是最新文档
+      const bundled = this.loadBundledConfigFromAsar()
+      if (bundled && bundled.packages.length > 0) return bundled
+
       // 1) 用户配置（userData 或开发时的项目路径）
       if (existsSync(this.configPath)) {
         const content = readFileSync(this.configPath, 'utf-8')
@@ -234,23 +260,10 @@ export class FunctionDocsManager {
         if (userConfig.packages.length > 0) {
           return userConfig
         }
-        const bundledPath = this.getBundledConfigPath()
-        if (bundledPath && existsSync(bundledPath)) {
-          const bundledContent = readFileSync(bundledPath, 'utf-8')
-          const bundled = this.normalizeConfig(JSON.parse(bundledContent))
-          if (bundled.packages.length > 0) {
-            return bundled
-          }
-        }
         return userConfig
       }
 
-      // 2) 无用户文件时：打包后读内置默认
-      const bundledPath = this.getBundledConfigPath()
-      if (bundledPath && existsSync(bundledPath)) {
-        const content = readFileSync(bundledPath, 'utf-8')
-        return this.normalizeConfig(JSON.parse(content))
-      }
+      // 2) 无用户文件时：非打包环境（开发/测试）回退到项目内置 function-docs.json
     } catch (error) {
       console.error('Failed to load function docs config:', error)
     }

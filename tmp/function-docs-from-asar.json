@@ -881,20 +881,6 @@
             { "name": "overwrite", "type": "boolean", "description": "是否覆盖输出文件", "required": false, "default": false },
             { "name": "do_combat", "type": "boolean", "description": "是否做 ComBat 批次校正", "required": false, "default": true }
           ]
-        },
-        {
-          "name": "transcriptome_pipeline_multi_any",
-          "category": "transcriptomics",
-          "description": "多数据集（任意来源）：count / TPM / GEO / expr -> 统一格式 -> 标准化 -> 合并+ComBat -> PCA -> 差异分析热图",
-          "documentation": "多数据集（任意来源）：count / TPM / GEO / expr -> 统一格式 -> 标准化 -> 合并+ComBat -> PCA -> 差异分析热图（含火山图）。\n\ndatasets 中每个元素需包含 type: \"count\" / \"tpm\" / \"geo\" / \"expr\"，并提供对应输入文件。\n\n运行流程：输入准备（统一为表达矩阵）-> 逐数据集标准化 -> 合并+可选 ComBat -> PCA -> limma 差异分析热图（含火山图）。",
-          "detailedParameters": [
-            { "name": "out_dir", "type": "directory", "description": "输出根目录（会生成 01_/02_/... 及 _pipeline/status）", "required": false, "default": ".", "placeholder": "请选择输出目录" },
-            { "name": "merge_prefix", "type": "string", "description": "合并输出前缀", "required": false, "default": "merge_any", "placeholder": "例如：merge_any" },
-            { "name": "batch_from_filename", "type": "boolean", "description": "是否从文件名提取 batch（传递给合并函数）", "required": false, "default": true },
-            { "name": "contrast", "type": "tags", "description": "limma 对比组（必须两组）", "required": true, "default": ["Control", "Disease"], "placeholder": "例如：Control,Disease" },
-            { "name": "overwrite", "type": "boolean", "description": "是否覆盖输出文件", "required": false, "default": false },
-            { "name": "do_combat", "type": "boolean", "description": "是否做 ComBat 批次校正", "required": false, "default": true }
-          ]
         }
       ]
     }

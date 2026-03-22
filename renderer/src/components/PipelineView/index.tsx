@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Card, Form, Input, message, Select, Space, Spin, Typography } from 'antd'
+import { Button, Card, Form, Input, InputNumber, message, Select, Space, Spin, Switch, Typography } from 'antd'
 import ReactFlow, { Background, Controls, type Edge, type Node, type ReactFlowInstance } from 'reactflow'
 import 'reactflow/dist/style.css'
 import dagre from 'dagre'
@@ -112,6 +112,12 @@ type DatasetItem = {
   // geo
   probe_file?: string
   ann_file?: string
+  /** ann.txt 中基因 Symbol 列：1-based 列号或表头列名（传给 transcriptome_read_expr_matrix） */
+  gene_symbol_col?: string | number
+  /** 读取 ann 的最大行数 */
+  max_ann_rows?: number
+  /** 是否输出 Excel 安全版 */
+  write_excel_safe?: boolean
 }
 
 /** 与 SharedParameterForm 的 FilePickerInput 一致：由 Form.Item 注入 value/onChange，选文件后调用 onChange 即可回显 */
@@ -146,8 +152,8 @@ function DatasetsBuilder({
       <Text strong>datasets（多数据集输入）</Text>
       <div className={styles.hint}>
         {geoOnly
-          ? '当前流程仅支持 GEO 数据集：每个数据集需要 probe_file、ann_file、group_file。'
-          : '支持混合输入：count 会先转换 TPM（如提供 annot_file 会先做 GeneID->Symbol）；tpm/expr 先读取表达矩阵（如提供 annot_file 也会把行名当作 GeneID->Symbol 转换）；geo 先注释生成表达矩阵。每个数据集都需要 group_file。'}
+          ? '当前流程仅支持 GEO 数据集：每个数据集需要 probe_file、ann_file、group_file。ann.txt 需含以 ID 开头的表头行；基因列可用 gene_symbol_col 指定列号或列名（默认与 R 包一致）。'
+          : '支持混合输入：count 会先转换 TPM（如提供 annot_file 会先做 GeneID->Symbol）；tpm/expr 先读取表达矩阵（如提供 annot_file 也会把行名当作 GeneID->Symbol 转换）；geo 先注释生成表达矩阵。每个数据集都需要 group_file。GEO 的 ann.txt 可用 gene_symbol_col / max_ann_rows / write_excel_safe 与 R 端一致。'}
       </div>
       <Form.List name="datasets">
         {(fields, { add, remove }) => (
@@ -267,7 +273,31 @@ function DatasetsBuilder({
                         name={[field.name, 'ann_file']}
                         rules={[{ required: true, message: '请选择 ann_file' }]}
                       >
-                        <DatasetFilePicker placeholder="注释文件 ann.txt" />
+                        <DatasetFilePicker placeholder="注释文件 ann.txt（表头含 ID 行）" />
+                      </Form.Item>
+                      <Form.Item
+                        label="gene_symbol_col"
+                        name={[field.name, 'gene_symbol_col']}
+                        tooltip="ann.txt 中基因 Symbol 所在列：填列号（如 11）或表头列名（如 Gene Symbol）。留空则使用 R 默认。"
+                      >
+                        <Input allowClear placeholder="默认 11；或列名如 Gene Symbol" />
+                      </Form.Item>
+                      <Form.Item
+                        label="max_ann_rows"
+                        name={[field.name, 'max_ann_rows']}
+                        initialValue={60000}
+                        tooltip="读取 ann.txt 的最大行数（大平台注释表可调大）"
+                      >
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item
+                        label="write_excel_safe"
+                        name={[field.name, 'write_excel_safe']}
+                        valuePropName="checked"
+                        initialValue={true}
+                        tooltip="是否额外输出 Excel 安全版（基因名前加单引号）"
+                      >
+                        <Switch checkedChildren="是" unCheckedChildren="否" />
                       </Form.Item>
                     </>
                   )}
@@ -602,9 +632,20 @@ export default function PipelineView() {
   const handleRun = async () => {
     try {
       if (running) return
-      const globalValues = await globalForm.validateFields()
+      const globalValues = await globalForm.validateFields() as Record<string, unknown>
+      // 可选参数若被清空，不要传空字符串给 R（尤其是 gene_symbol_col）
+      if (globalValues.gene_symbol_col === '' || globalValues.gene_symbol_col == null) {
+        delete globalValues.gene_symbol_col
+      }
+      if (Array.isArray(globalValues.datasets)) {
+        globalValues.datasets = globalValues.datasets.map((ds: Record<string, unknown>) => {
+          const d = { ...ds }
+          if (d.gene_symbol_col === '' || d.gene_symbol_col == null) delete d.gene_symbol_col
+          return d
+        })
+      }
       if (pipelineName === 'transcriptome_pipeline_multi_any' || pipelineName === 'transcriptome_pipeline_multi') {
-        const ds = (globalValues as any)?.datasets as DatasetItem[] | undefined
+        const ds = globalValues.datasets as DatasetItem[] | undefined
         if (!Array.isArray(ds) || ds.length === 0) {
           message.error('请先在 datasets 中至少添加 1 个数据集')
           return

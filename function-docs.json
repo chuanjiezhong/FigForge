@@ -370,11 +370,11 @@
             },
             {
               "name": "gene_symbol_col",
-              "type": "number",
-              "description": "基因名所在列（1-based）",
+              "type": "string",
+              "description": "基因 Symbol 所在列：1-based 列号（如 11）或表头列名（如 Gene Symbol），需与 ann 表头匹配",
               "required": false,
-              "default": 11,
-              "min": 1
+              "default": "11",
+              "placeholder": "例如：11 或 Gene Symbol"
             },
             {
               "name": "max_ann_rows",
@@ -841,7 +841,30 @@
           "documentation": "单数据集一键流程：GEO 注释 -> 标准化 -> 差异分析热图（可选火山图）\n\n将 transcriptome_read_expr_matrix()、transcriptome_normalize_matrix()、transcriptome_plot_heatmap_limma() 串联为一键流程；运行过程中会在 out_dir/_pipeline/status/ 下写入每步状态 JSON，并在结束时写入 out_dir/_pipeline/artifacts.json 方便前端展示产物。\n\n@param probe_file,ann_file character；用于 GEO 注释的输入文件（probe + ann）。\n@param group_file character；分组文件（两列：sample, group）。\n@param out_dir character；输出根目录。\n@param prefix character；输出前缀（用于文件命名）。\n@param geo_id character|NULL；用于样本列名前缀。\n@param contrast character 长度为 2；limma 对比组。\n@param overwrite logical；是否覆盖输出文件。\n@param ... 其余参数会传递给 transcriptome_plot_heatmap_limma()。\n\n@return 不可见 list，包含每一步的结果与输出路径。",
           "detailedParameters": [
             { "name": "probe_file", "type": "file", "description": "probe 表/series_matrix 表达矩阵文件路径", "required": true, "placeholder": "请选择 probe 表/series_matrix 文件" },
-            { "name": "ann_file", "type": "file", "description": "注释文件路径（ann.txt）", "required": true, "placeholder": "请选择注释文件 ann.txt" },
+            { "name": "ann_file", "type": "file", "description": "注释文件路径（ann.txt；表头需含以 ID 开头的行；基因 Symbol 列默认第 11 列，可用 gene_symbol_col 指定列号或列名）", "required": true, "placeholder": "请选择注释文件 ann.txt" },
+            {
+              "name": "gene_symbol_col",
+              "type": "string",
+              "description": "ann.txt 中基因 Symbol 所在列：填 1-based 列号（如 11）或表头列名（如 Gene Symbol）。与 R 中 transcriptome_read_expr_matrix() 一致。",
+              "required": false,
+              "default": "11",
+              "placeholder": "例如：11 或 Gene Symbol"
+            },
+            {
+              "name": "max_ann_rows",
+              "type": "number",
+              "description": "读取 ann.txt 的最大行数（大注释表可调大）",
+              "required": false,
+              "default": 60000,
+              "min": 1
+            },
+            {
+              "name": "write_excel_safe",
+              "type": "boolean",
+              "description": "是否额外输出 Excel 安全版（基因名前加单引号）",
+              "required": false,
+              "default": true
+            },
             { "name": "group_file", "type": "file", "description": "分组文件（两列：sample, group）", "required": true, "placeholder": "请选择分组文件" },
             { "name": "out_dir", "type": "directory", "description": "输出根目录（会生成 01_/02_/03_ 以及 _pipeline/status）", "required": false, "default": ".", "placeholder": "请选择输出目录（默认 .）" },
             { "name": "prefix", "type": "string", "description": "输出前缀（用于文件命名）", "required": false, "default": "single", "placeholder": "例如：GSE123456" },

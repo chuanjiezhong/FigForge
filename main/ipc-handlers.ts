@@ -1,4 +1,4 @@
-import { ipcMain, dialog, app } from 'electron'
+import { ipcMain, dialog, app, shell } from 'electron'
 import { spawn } from 'child_process'
 // NOTE: Main-process code changes require a full main bundle rebuild (electron-vite will do this in dev).
 import { RProcessor } from './r-engine/r-processor'
@@ -16,7 +16,8 @@ import {
   addExternalPipelineDir,
   removeExternalPipelineDir 
 } from './r-engine/pipeline-config'
-import { readFile, writeFile, copyFile } from 'fs/promises'
+import { readFile, writeFile, copyFile, readdir, unlink } from 'fs/promises'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { mkdir } from 'fs/promises'
 import { homedir } from 'os'
@@ -151,6 +152,62 @@ ipcMain.handle('read-file', async (_, filePath: string) => {
 ipcMain.handle('write-file', async (_, filePath: string, data: string) => {
   try {
     await writeFile(filePath, data, 'utf-8')
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+/** 删除 `_pipeline/status` 下上次运行的步骤 JSON，避免重新分析时轮询读到旧状态 */
+ipcMain.handle('clear-pipeline-status-dir', async (_, statusDir: string) => {
+  try {
+    const dir = typeof statusDir === 'string' ? statusDir.trim() : ''
+    if (!dir || !existsSync(dir)) {
+      return { success: true as const }
+    }
+    const names = await readdir(dir)
+    for (const name of names) {
+      if (name.endsWith('.json')) {
+        await unlink(join(dir, name))
+      }
+    }
+    return { success: true as const }
+  } catch (error) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : '清空步骤状态失败',
+    }
+  }
+})
+
+/** 将富文本 HTML 导出为 Word（.docx），供解读稿「编辑并导出」使用 */
+ipcMain.handle('export-html-to-docx', async (_, html: string, filePath: string) => {
+  try {
+    const { default: HTMLtoDOCX } = await import('html-to-docx')
+    const buffer = await HTMLtoDOCX(html, null, {
+      title: 'FigForge',
+      creator: 'FigForge',
+      decodeUnicode: true,
+      lang: 'zh-CN',
+    })
+    await writeFile(filePath, buffer)
+    return { success: true as const }
+  } catch (error) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : '导出 Word 失败',
+    }
+  }
+})
+
+/** 在访达/资源管理器中定位到文件（用于打开解读稿所在目录） */
+ipcMain.handle('show-item-in-folder', async (_, filePath: string) => {
+  try {
+    const { existsSync } = await import('fs')
+    if (!existsSync(filePath)) {
+      return { success: false, error: `文件不存在：${filePath}` }
+    }
+    shell.showItemInFolder(filePath)
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import { Modal, Table, Button, Space, Drawer, Tag, message, Input, Image, Empty, Form, InputNumber, Select, Switch, Divider } from 'antd'
+import { Modal, Table, Button, Space, Drawer, Tag, message, Input, Image, Empty, Form, InputNumber, Select, Switch, Divider, Tabs, Spin } from 'antd'
 import { HistoryOutlined, DeleteOutlined, FilePdfOutlined, EditOutlined } from '@ant-design/icons'
 import styles from './index.module.less'
 import {
@@ -7,14 +7,25 @@ import {
   deleteRunRecord,
   listRunHistory,
   subscribeRunHistory,
+  updateRunRecord,
   type RunRecord,
   type RunStatus,
 } from '../../stores/runHistoryStore'
 import type { ColumnsType } from 'antd/es/table'
 import { pdfFirstPageToDataUrl } from '../../utils/pdfToDataUrl'
+import InterpretationDocModal from '../InterpretationDocModal'
 
 const { TextArea } = Input
 const { Option } = Select
+
+function defaultInterpretationPaths(outputDir: string) {
+  const p = outputDir.replace(/[/\\]$/, '').replace(/\\/g, '/')
+  return {
+    zh: `${p}/_pipeline/interpretation_zh.md`,
+    en: `${p}/_pipeline/interpretation_en.md`,
+    meta: `${p}/_pipeline/interpretation_meta.json`,
+  }
+}
 
 type PlotParamDef = {
   name: string
@@ -57,6 +68,13 @@ export default function RunHistory({ open, onClose, onEditImageInCanvas }: RunHi
   const [docsMap, setDocsMap] = useState<Record<string, PlotConfig>>({})
   const [plotForm] = Form.useForm()
   const [plotting, setPlotting] = useState(false)
+  /** 运行记录详情：解读稿文件内容与用户备注 */
+  const [interpLoading, setInterpLoading] = useState(false)
+  const [interpFileZh, setInterpFileZh] = useState('')
+  const [interpFileEn, setInterpFileEn] = useState('')
+  const [interpNoteZh, setInterpNoteZh] = useState('')
+  const [interpNoteEn, setInterpNoteEn] = useState('')
+  const [interpretModalOpen, setInterpretModalOpen] = useState(false)
 
   const isImageFile = (path: string) => {
     const ext = path.split('.').pop()?.toLowerCase()
@@ -203,6 +221,45 @@ export default function RunHistory({ open, onClose, onEditImageInCanvas }: RunHi
     plotForm.setFieldsValue(initial)
   }, [selected, docsMap, plotForm, getPlotConfig])
 
+  // 详情抽屉：加载 _pipeline 解读稿（中英）
+  useEffect(() => {
+    if (!detailOpen || !selected?.outputDir) return
+    setInterpNoteZh(selected.interpretationNotes?.zh || '')
+    setInterpNoteEn(selected.interpretationNotes?.en || '')
+    setInterpFileZh('')
+    setInterpFileEn('')
+    setInterpLoading(true)
+    const paths = selected.interpretationPaths || defaultInterpretationPaths(selected.outputDir)
+    let cancelled = false
+    void Promise.all([
+      paths.zh ? window.electronAPI.readFile(paths.zh) : Promise.resolve({ success: false as const, content: '' }),
+      paths.en ? window.electronAPI.readFile(paths.en) : Promise.resolve({ success: false as const, content: '' }),
+    ]).then(([rzh, ren]) => {
+      if (cancelled) return
+      setInterpFileZh(rzh.success && rzh.content ? rzh.content : '')
+      setInterpFileEn(ren.success && ren.content ? ren.content : '')
+      setInterpLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [detailOpen, selected?.id, selected?.outputDir, selected?.interpretationPaths?.zh, selected?.interpretationPaths?.en])
+
+  const saveInterpretationNotes = useCallback(() => {
+    if (!selected) return
+    updateRunRecord(selected.id, {
+      interpretationNotes: {
+        ...(selected.interpretationNotes || {}),
+        zh: interpNoteZh,
+        en: interpNoteEn,
+      },
+    })
+    message.success('已保存补充说明')
+    refresh()
+    const updated = listRunHistory().find((r) => r.id === selected.id)
+    if (updated) setSelected(updated)
+  }, [selected, interpNoteZh, interpNoteEn])
+
   const escapeRString = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 
   const toRValue = (value: unknown): string => {
@@ -282,6 +339,12 @@ export default function RunHistory({ open, onClose, onEditImageInCanvas }: RunHi
         title: '函数',
         dataIndex: 'functionName',
         key: 'functionName',
+        render: (name: string, r: RunRecord) => (
+          <Space size={4} wrap>
+            {r.runKind === 'pipeline' && <Tag color="blue">Pipeline</Tag>}
+            <span>{name}</span>
+          </Space>
+        ),
       },
       {
         title: '状态',
@@ -475,6 +538,59 @@ export default function RunHistory({ open, onClose, onEditImageInCanvas }: RunHi
                 </div>
               </>
             )}
+            <Divider />
+            <div>
+              <Space wrap align="center">
+                <b>结果解读（中英草稿）</b>
+                <Button type="primary" onClick={() => setInterpretModalOpen(true)}>
+                  文档视图
+                </Button>
+                <Button
+                  size="small"
+                  onClick={async () => {
+                    if (!selected) return
+                    const p =
+                      selected.interpretationPaths?.zh || defaultInterpretationPaths(selected.outputDir).zh
+                    const r = await window.electronAPI.showItemInFolder(p)
+                    if (!r.success) message.warning(r.error || '无法打开')
+                  }}
+                >
+                  在文件夹中显示
+                </Button>
+              </Space>
+              <div style={{ marginTop: 8, fontSize: 12, color: '#8c8c8c' }}>
+                点击「文档视图」打开弹窗：纸张式阅读自动解读稿，并在弹窗底部填写仅保存在本机的补充说明。
+              </div>
+              {interpLoading && (
+                <div style={{ marginTop: 8 }}>
+                  <Spin size="small" /> <span style={{ marginLeft: 8, color: '#8c8c8c' }}>正在加载解读稿…</span>
+                </div>
+              )}
+            </div>
+            {selected && (
+              <InterpretationDocModal
+                open={interpretModalOpen}
+                onClose={() => setInterpretModalOpen(false)}
+                title="结果解读与补充说明"
+                loading={interpLoading}
+                zhContent={interpFileZh}
+                enContent={interpFileEn}
+                showNotes
+                noteZh={interpNoteZh}
+                noteEn={interpNoteEn}
+                onNoteZhChange={setInterpNoteZh}
+                onNoteEnChange={setInterpNoteEn}
+                onSaveNotes={saveInterpretationNotes}
+                onShowInFolder={async () => {
+                  if (!selected) return
+                  const p =
+                    selected.interpretationPaths?.zh || defaultInterpretationPaths(selected.outputDir).zh
+                  const r = await window.electronAPI.showItemInFolder(p)
+                  if (!r.success) message.warning(r.error || '无法打开')
+                }}
+              />
+            )}
+            <Divider />
             <TextArea className={styles.code} value={selected.script} autoSize={{ minRows: 18, maxRows: 28 }} readOnly />
             {getPlotConfig(selected) ? (
               <>

@@ -50,7 +50,7 @@ figforge/
 ## 环境要求
 
 - **Node.js**: >= 18.17.0 (推荐使用 20.x LTS)
-- **Yarn**: >= 1.22.0
+- **Yarn**: 4.x（见 `package.json` 的 `packageManager`，建议 `corepack enable` 后使用）
 - **R**: >= 4.0.0 (用于运行分析 Pipeline)
 
 ### Node 版本管理
@@ -82,6 +82,16 @@ yarn install
 ```bash
 yarn dev
 ```
+
+### 常见问题：`lockfile` / `figforge@workspace` 报错
+
+若出现 **`This package doesn't seem to be present in your lockfile`** 或 **`figforge@workspace:.`** 相关错误，通常是 **`package.json` 与 `yarn.lock` 不同步**，或 **混用了 npm 与 yarn**。
+
+处理步骤：
+
+1. **使用 Node 18+**（推荐按 `.nvmrc`：`nvm use`）。
+2. 在项目根目录执行：**`yarn install`**，让 Yarn 4 更新锁文件（勿与 `npm install` 混用）。
+3. 若仓库里存在 **`package-lock.json`**，请删除（本仓库以 **Yarn** 为准）。
 
 ### 构建
 
@@ -224,6 +234,7 @@ release/
 - 支持多 pipeline
 - JSON 参数输入
 - 进度回调和日志输出
+- **转录组 pipeline 成功结束后**：若 R 包在输出目录 `_pipeline/` 生成了 `interpretation_zh.md` / `interpretation_en.md`，流程页右侧会显示 **「结果解读（中英草稿）」**，可预览并在访达中打开文件编辑
 
 ### 2. 渲染引擎（Rendering Engine）
 - R/ggplot 输出 SVG
@@ -238,6 +249,37 @@ release/
 - 支持 SVG/PDF/PNG/TIFF
 - 支持高 DPI（300/600 dpi）
 - 支持期刊模板
+
+## Pipeline 与单函数：建议怎么用
+
+**原则**：FigForge 里的 **Pipeline 界面**适合跑通**标准主干**（输入 → 标准化 → 差异 → 出图）；**细调阈值、重画某一类图、换基因列表**等，建议在 R 里**单独调用 OmicsFlowCore 函数**（或基于上一步输出目录再跑），避免把流程配置做成「驾驶舱」。
+
+### 建议在 Pipeline 里只关心的（粗粒度）
+
+| 类别 | 示例 |
+|------|------|
+| 数据与路径 | `out_dir`、`probe_file` / `ann_file`、`group_file`、多数据集时的 `datasets` |
+| 对比与合并 | `contrast`、`merge_prefix`、`do_combat`（多数据集）、`overwrite` |
+| 物种 / 类型 | `species`（count 流程）、数据集 `type`（multi_any） |
+| 可选大开关 | 是否做 GeneID→Symbol（`annot_file` 等）、GEO 的 `gene_symbol_col` 等 |
+
+### 建议不要依赖 Pipeline 配满、改单独函数更合适的（细粒度）
+
+| 需求 | 更合适的做法 |
+|------|----------------|
+| 改 limma 阈值（logFC、FDR/P、top_n） | `transcriptome_plot_heatmap_limma()`，输入上一步标准化矩阵 |
+| 只重画火山图 / 换标注基因数 | `transcriptome_plot_volcano()`，输入 `all_diff.txt` |
+| 只重画热图 / 换配色与聚类 | `transcriptome_plot_heatmap_limma()` 或 `transcriptome_redraw_heatmap_rds()` |
+| PCA 仅换标题或样式 | `transcriptome_plot_pca()` / `transcriptome_redraw_pca_rds()` |
+| 合并矩阵再调 ComBat | `transcriptome_merge_normalize_combat()` 等单独步骤 |
+
+### 进阶：`config` 与 `...`
+
+R 包内 Pipeline 支持 `config`（按步骤覆盖）和顶层 `...`（传给差异热图等）。**产品策略上**：界面以**少量全局参数**为主；需要反复试的选项，**文档引导用户到单函数**更清晰。R 包侧更完整的说明见 **OmicsFlowCoreFullVersion** 仓库 README 中的「Pipeline 与单函数」一节。
+
+### 后续加新流程（扩展口子）
+
+新增组学或其它一键流程时，按 **`docs/extending-pipelines.md`** 清单操作即可：在 R 包 **`transcriptome_pipeline_defs()`** 里注册、导出函数、补充 **`function-docs.json`**；FigForge 流程图与下拉框会随定义自动更新，**一般不必改 Electron 核心**——只有需要类似「多数据集」专用表单时，再在 `PipelineView` 里为 `pipelineName` 加分支。
 
 ## 开发计划
 

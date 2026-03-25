@@ -102,6 +102,30 @@ export class RFunctionManager {
     return value
   }
 
+  /**
+   * 嵌套 config（如 deg_heatmap）里 palette 常是 UI 逗号拼接字符串 "a,b,c"，
+   * JSON 会变成标量；需在序列化前拆成数组，使 jsonlite::fromJSON 得到 R 字符向量。
+   */
+  private splitCommaSeparatedPaletteDeep(value: unknown): unknown {
+    if (value === null || value === undefined) return value
+    if (Array.isArray(value)) return value.map((v) => this.splitCommaSeparatedPaletteDeep(v))
+    if (typeof value === 'object') {
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if ((k === 'palette' || k === 'color_gradient') && typeof v === 'string' && v.includes(',')) {
+          out[k] = v
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        } else {
+          out[k] = this.splitCommaSeparatedPaletteDeep(v)
+        }
+      }
+      return out
+    }
+    return value
+  }
+
   private toRValue(value: unknown): string {
     if (value === undefined || value === null) return 'NULL'
     if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
@@ -136,6 +160,10 @@ export class RFunctionManager {
     inputFiles: string[],
     outputDir: string
   ): string {
+    const paramsForR = this.splitCommaSeparatedPaletteDeep(
+      JSON.parse(JSON.stringify(params))
+    ) as Record<string, unknown>
+
     // 让 R 在解析 source 字符串 & 处理文件路径时使用 UTF-8
     let rCode = `
       # Ensure UTF-8 decoding for non-ascii file paths/params
@@ -167,7 +195,7 @@ export class RFunctionManager {
     })
 
     // 构建函数调用参数
-    const needsJsonlite = Object.values(params).some((v) => v && typeof v === 'object' && !Array.isArray(v))
+    const needsJsonlite = Object.values(paramsForR).some((v) => v && typeof v === 'object' && !Array.isArray(v))
     if (needsJsonlite) {
       rCode += `
         # 确保 jsonlite 可用（用于解析复杂参数）
@@ -177,7 +205,7 @@ export class RFunctionManager {
       `
     }
 
-    const paramList = Object.entries(params)
+    const paramList = Object.entries(paramsForR)
       .filter(([key, v]) => key !== 'annotation_dataset_levels' && v !== undefined) // annotation_dataset_levels 仅前端可视化用，不传给 R
       .map(([key, value]) => {
         // color_gradient：R 端必须是 character 向量 c("blue", "green", ...)，不能是单个字符串

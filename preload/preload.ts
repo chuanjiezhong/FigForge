@@ -35,9 +35,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 文件系统相关
   readFile: (path: string) =>
     ipcRenderer.invoke('read-file', path),
+
+  /** 在系统文件管理器中显示文件（选中该文件） */
+  showItemInFolder: (filePath: string) =>
+    ipcRenderer.invoke('show-item-in-folder', filePath) as Promise<{ success: boolean; error?: string }>,
   
   writeFile: (path: string, data: string) =>
     ipcRenderer.invoke('write-file', path, data),
+
+  /** HTML → .docx（主进程 html-to-docx） */
+  exportHtmlToDocx: (html: string, filePath: string) =>
+    ipcRenderer.invoke('export-html-to-docx', html, filePath) as Promise<{ success: boolean; error?: string }>,
+
+  /** 清空 out_dir/_pipeline/status 下 *.json，重新跑 Pipeline 前避免旧节点状态 */
+  clearPipelineStatusDir: (statusDir: string) =>
+    ipcRenderer.invoke('clear-pipeline-status-dir', statusDir) as Promise<{ success: boolean; error?: string }>,
   
   selectDirectory: () =>
     ipcRenderer.invoke('select-directory'),
@@ -195,7 +207,10 @@ export type ElectronAPI = {
   exportToImage: (layoutData: unknown, options: Record<string, unknown>) => Promise<unknown>
   exportToSVG: (svgString: string, outputPath: string) => Promise<{ success: boolean; error?: string }>
   readFile: (path: string) => Promise<{ success: boolean; content?: string; error?: string }>
+  showItemInFolder: (filePath: string) => Promise<{ success: boolean; error?: string }>
   writeFile: (path: string, data: string) => Promise<{ success: boolean; error?: string }>
+  exportHtmlToDocx: (html: string, filePath: string) => Promise<{ success: boolean; error?: string }>
+  clearPipelineStatusDir: (statusDir: string) => Promise<{ success: boolean; error?: string }>
   selectDirectory: () => Promise<string | null>
   selectSavePath: (options?: { defaultPath?: string; filters?: Electron.FileFilter[] }) => Promise<string | null>
   selectFiles: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => Promise<string[]>

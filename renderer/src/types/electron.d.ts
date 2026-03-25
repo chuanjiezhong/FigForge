@@ -32,6 +32,10 @@ declare global {
       // 文件系统相关
       readFile: (path: string) => Promise<{ success: boolean; content?: string; error?: string }>
       writeFile: (path: string, data: string) => Promise<{ success: boolean; error?: string }>
+      /** 将 HTML 导出为 .docx（主进程） */
+      exportHtmlToDocx: (html: string, filePath: string) => Promise<{ success: boolean; error?: string }>
+      /** 清空 Pipeline 步骤状态目录，重新分析前避免读到旧 JSON */
+      clearPipelineStatusDir: (statusDir: string) => Promise<{ success: boolean; error?: string }>
       selectDirectory: () => Promise<string | null>
       selectSavePath: (options?: { defaultPath?: string; filters?: Electron.FileFilter[] }) => Promise<string | null>
       selectFiles: (options?: Electron.OpenDialogOptions) => Promise<string[]>

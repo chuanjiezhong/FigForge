@@ -1,10 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Card, Form, Input, InputNumber, message, Select, Space, Spin, Switch, Typography } from 'antd'
+import { addRunRecord, newRunRecordId, updateRunRecord } from '../../stores/runHistoryStore'
+import {
+  Button,
+  Card,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Typography,
+} from 'antd'
 import ReactFlow, { Background, Controls, type Edge, type Node, type ReactFlowInstance } from 'reactflow'
 import 'reactflow/dist/style.css'
 import dagre from 'dagre'
 import type { ParameterInfo } from '../../types/pipeline'
 import { ParameterForm, type ParameterFormValue } from '../SharedParameterForm'
+import InterpretationDocModal from '../InterpretationDocModal'
 import styles from './index.module.less'
 
 const { Text } = Typography
@@ -330,10 +344,21 @@ export default function PipelineView() {
   const [stepOverrides, setStepOverrides] = useState<Record<string, ParameterFormValue>>({})
   const [running, setRunning] = useState(false)
   const [runOutputDir, setRunOutputDir] = useState<string | null>(null)
+  /** R 包生成的中英解读稿（见 out_dir/_pipeline/interpretation_*.md） */
+  const [interpretation, setInterpretation] = useState<{
+    zh?: string
+    en?: string
+    zhPath?: string
+    enPath?: string
+    metaPath?: string
+  } | null>(null)
+  const [interpretModalOpen, setInterpretModalOpen] = useState(false)
   const [statusDir, setStatusDir] = useState<string | null>(null)
   const [stepStatusMap, setStepStatusMap] = useState<Record<string, StepStatus>>({})
   const pollingRef = useRef<number | null>(null)
   const rfRef = useRef<ReactFlowInstance | null>(null)
+  /** 当前次 Pipeline 运行对应「运行记录」id，用于成功/失败后回写 */
+  const pipelineRunIdRef = useRef<string | null>(null)
 
   const steps = defs?.[pipelineName]?.steps ?? []
   const selectedStep = steps.find((s) => s.step_id === selectedStepId) ?? null
@@ -463,6 +488,7 @@ export default function PipelineView() {
     setStepStatusMap({})
     setRunOutputDir(null)
     setStatusDir(null)
+    setInterpretation(null)
 
     const loadPipelineDoc = async () => {
       const res = await window.electronAPI.getRFunctionDoc(pipelineName, 'OmicsFlowCoreFullVersion')
@@ -668,6 +694,7 @@ export default function PipelineView() {
 
       // 生成脚本并异步运行（这样才能实时轮询 status）
       setStepStatusMap({})
+      setInterpretation(null)
       setRunning(true)
       const gen = await window.electronAPI.generateRFunctionScript(pipelineName, 'OmicsFlowCoreFullVersion', params, [])
       if (!gen.success || !gen.outputDir || !gen.script) {
@@ -685,7 +712,29 @@ export default function PipelineView() {
 
       setRunOutputDir(baseOut)
       const statusDirPath = `${baseOut.replace(/\\/g, '/')}/_pipeline/status`
+      const clearRes = await window.electronAPI.clearPipelineStatusDir(statusDirPath)
+      if (!clearRes.success) {
+        message.warning(clearRes.error || '无法清空上次步骤状态，流程图可能短暂显示旧状态')
+      }
+      if (steps.length > 0) {
+        setSelectedStepId(steps[0].step_id)
+      }
       setStatusDir(statusDirPath)
+
+      const startedAt = Date.now()
+      const runId = newRunRecordId(startedAt)
+      pipelineRunIdRef.current = runId
+      addRunRecord({
+        id: runId,
+        functionName: pipelineName,
+        packageName: 'OmicsFlowCoreFullVersion',
+        startedAt,
+        status: 'running',
+        outputDir: baseOut,
+        script: gen.script,
+        params,
+        runKind: 'pipeline',
+      })
 
       const cleanup = window.electronAPI.onRunRScriptResult?.(async (result) => {
         cleanup?.()
@@ -715,10 +764,41 @@ export default function PipelineView() {
           /* ignore */
         }
         setRunning(false)
+        const rid = pipelineRunIdRef.current
+        pipelineRunIdRef.current = null
         if (result.success && result.outputDir) {
           message.success(`Pipeline 运行完成：${baseOut}`)
+          const normBase = baseOut.replace(/\\/g, '/')
+          const zhPath = `${normBase}/_pipeline/interpretation_zh.md`
+          const enPath = `${normBase}/_pipeline/interpretation_en.md`
+          const metaPath = `${normBase}/_pipeline/interpretation_meta.json`
+          if (rid) {
+            updateRunRecord(rid, {
+              status: 'success',
+              finishedAt: Date.now(),
+              interpretationPaths: { zh: zhPath, en: enPath, meta: metaPath },
+            })
+          }
+          void Promise.all([window.electronAPI.readFile(zhPath), window.electronAPI.readFile(enPath)]).then(
+            ([rzh, ren]) => {
+              setInterpretation({
+                zh: rzh.success && rzh.content ? rzh.content : undefined,
+                en: ren.success && ren.content ? ren.content : undefined,
+                zhPath,
+                enPath,
+                metaPath,
+              })
+            }
+          )
         } else {
           const err = result.error || '脚本执行失败'
+          if (rid) {
+            updateRunRecord(rid, {
+              status: 'error',
+              finishedAt: Date.now(),
+              error: err === '分析已取消' ? '分析已取消' : err,
+            })
+          }
           if (err !== '分析已取消') message.error(err)
           else message.info('分析已取消')
         }
@@ -728,11 +808,29 @@ export default function PipelineView() {
       if (!run.started) {
         cleanup?.()
         setRunning(false)
+        const rid = pipelineRunIdRef.current
+        pipelineRunIdRef.current = null
+        if (rid) {
+          updateRunRecord(rid, {
+            status: 'error',
+            finishedAt: Date.now(),
+            error: run.error || '启动失败',
+          })
+        }
         message.error(run.error || '启动失败')
       }
     } catch (e) {
       // 表单校验失败不提示
       if (e && typeof e === 'object' && 'errorFields' in (e as any)) return
+      const rid = pipelineRunIdRef.current
+      if (rid) {
+        pipelineRunIdRef.current = null
+        updateRunRecord(rid, {
+          status: 'error',
+          finishedAt: Date.now(),
+          error: (e as Error)?.message || '运行时出错',
+        })
+      }
       message.error((e as Error)?.message || '运行时出错')
       setRunning(false)
     }
@@ -849,6 +947,46 @@ export default function PipelineView() {
               </>
             )}
           </Card>
+
+          {interpretation?.zhPath ? (
+            <>
+              <div style={{ height: 12 }} />
+              <Card size="small" title="结果解读（中英草稿）">
+                <Text type="secondary" style={{ display: 'block', marginBottom: 10 }}>
+                  由 OmicsFlowCore R 包在输出目录 <code>_pipeline/</code> 下自动生成；点击「文档视图」以纸张式阅读，便于对照修改后写入论文。
+                </Text>
+                <Space wrap>
+                  <Button type="primary" onClick={() => setInterpretModalOpen(true)}>
+                    文档视图
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={async () => {
+                      if (!interpretation.zhPath) return
+                      const r = await window.electronAPI.showItemInFolder(interpretation.zhPath)
+                      if (!r.success) message.warning(r.error || '无法打开文件夹')
+                    }}
+                  >
+                    在文件夹中显示
+                  </Button>
+                </Space>
+              </Card>
+
+              <InterpretationDocModal
+                open={interpretModalOpen}
+                onClose={() => setInterpretModalOpen(false)}
+                title="结果解读（文档视图）"
+                zhContent={interpretation.zh || ''}
+                enContent={interpretation.en || ''}
+                showNotes={false}
+                onShowInFolder={async () => {
+                  if (!interpretation?.zhPath) return
+                  const r = await window.electronAPI.showItemInFolder(interpretation.zhPath)
+                  if (!r.success) message.warning(r.error || '无法打开文件夹')
+                }}
+              />
+            </>
+          ) : null}
         </div>
       </div>
     </div>

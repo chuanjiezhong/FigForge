@@ -85,6 +85,8 @@ declare global {
       // R 包更新（从 GitHub 安装/更新）
       getRPackageUpdateList: () => Promise<{ success: boolean; packages?: string[]; error?: string }>
       installRPackageFromGitHub: (repo: string) => Promise<{ success: boolean; error?: string }>
+      getGitHubToken: () => Promise<{ success: boolean; token?: string; error?: string }>
+      setGitHubToken: (token: string) => Promise<{ success: boolean; error?: string }>
 
       // 运行记录
       getRunHistory: (limit?: number) => Promise<{ success: boolean; records?: unknown[]; error?: string }>

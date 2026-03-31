@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { List, Empty, Button, message, Collapse, Typography, Select } from 'antd'
+import { List, Empty, Button, message, Collapse, Typography, Select, Input, Space } from 'antd'
 import { PlayCircleOutlined, CloudDownloadOutlined } from '@ant-design/icons'
 import styles from './index.module.less'
 import type { RFunctionInfo } from '../../types/pipeline'
@@ -22,6 +22,8 @@ function FunctionList({ onSelectFunction }: FunctionListProps) {
   const [githubPackages, setGithubPackages] = useState<string[]>([])
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null)
   const [updatingRepo, setUpdatingRepo] = useState<string | null>(null)
+  const [githubToken, setGithubToken] = useState<string>('')
+  const [hasSavedToken, setHasSavedToken] = useState<boolean>(false)
 
   // 加载函数列表
   const loadFunctions = async () => {
@@ -95,6 +97,13 @@ function FunctionList({ onSelectFunction }: FunctionListProps) {
   useEffect(() => {
     loadFunctions()
     loadGithubPackages()
+    void (async () => {
+      if (typeof window.electronAPI.getGitHubToken !== 'function') return
+      const res = await window.electronAPI.getGitHubToken()
+      if (res.success) {
+        setHasSavedToken(Boolean(res.token && res.token.trim()))
+      }
+    })()
   }, [])
 
   const handleUpdatePackage = async () => {
@@ -109,6 +118,18 @@ function FunctionList({ onSelectFunction }: FunctionListProps) {
     }
     setUpdatingRepo(repo)
     try {
+      if (typeof window.electronAPI.setGitHubToken === 'function') {
+        // 若用户输入了 token，则保存到本机（不回显），后续更新无需重复输入
+        if (githubToken.trim()) {
+          const saved = await window.electronAPI.setGitHubToken(githubToken.trim())
+          if (!saved.success) {
+            message.error(saved.error || '保存 GitHub Token 失败')
+            return
+          }
+          setGithubToken('')
+          setHasSavedToken(true)
+        }
+      }
       const result = await window.electronAPI.installRPackageFromGitHub(repo)
       if (result.success) {
         message.success(`${repoDisplayName(repo)} 更新成功`)
@@ -171,6 +192,37 @@ function FunctionList({ onSelectFunction }: FunctionListProps) {
             >
               更新
             </Button>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Input.Password
+                size="small"
+                placeholder={hasSavedToken ? '已保存 Token（可留空直接更新）' : '可选：填入 GitHub Token（私有仓库需要）'}
+                value={githubToken}
+                onChange={(e) => setGithubToken(e.target.value)}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span style={{ color: '#888', fontSize: 12 }}>
+                  Token 仅保存在本机，用于 remotes 拉取私有仓库。
+                </span>
+                <Button
+                  size="small"
+                  onClick={async () => {
+                    if (typeof window.electronAPI.setGitHubToken !== 'function') return
+                    const res = await window.electronAPI.setGitHubToken('')
+                    if (res.success) {
+                      setHasSavedToken(false)
+                      setGithubToken('')
+                      message.success('已清除 Token')
+                    } else {
+                      message.error(res.error || '清除失败')
+                    }
+                  }}
+                >
+                  清除 Token
+                </Button>
+              </div>
+            </Space>
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { ipcMain, dialog, app, shell } from 'electron'
+import { ipcMain, dialog, app, safeStorage, shell } from 'electron'
 import { spawn } from 'child_process'
 // NOTE: Main-process code changes require a full main bundle rebuild (electron-vite will do this in dev).
 import { RProcessor } from './r-engine/r-processor'
@@ -22,6 +22,7 @@ import { join } from 'path'
 import { mkdir } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
 import { convertPdfToImage } from './utils/pdf-to-image'
+import { readFile as readFileAsync, writeFile as writeFileAsync } from 'fs/promises'
 
 const rProcessor = new RProcessor()
 const pipelineManager = new PipelineManager()
@@ -31,6 +32,59 @@ const imageExporter = new ImageExporter()
 const gitManager = new GitManager()
 const functionDocsManager = new FunctionDocsManager()
 const runHistoryManager = new RunHistoryManager()
+
+function githubAuthConfigPath(): string {
+  try {
+    return join(app.getPath('userData'), 'github-auth.json')
+  } catch {
+    return join(homedir(), '.figforge_github_auth.json')
+  }
+}
+
+async function loadGithubToken(): Promise<string | null> {
+  const p = githubAuthConfigPath()
+  try {
+    if (!existsSync(p)) return null
+    const raw = await readFileAsync(p, 'utf-8')
+    const parsed = JSON.parse(raw) as { v?: number; token?: string; enc?: string }
+    // 兼容旧版明文 token
+    const plain = typeof parsed?.token === 'string' ? parsed.token.trim() : ''
+    if (plain) return plain
+    const enc = typeof parsed?.enc === 'string' ? parsed.enc.trim() : ''
+    if (!enc) return null
+    if (!safeStorage.isEncryptionAvailable()) return null
+    const buf = Buffer.from(enc, 'base64')
+    const dec = safeStorage.decryptString(buf)
+    const t = typeof dec === 'string' ? dec.trim() : ''
+    return t ? t : null
+  } catch {
+    return null
+  }
+}
+
+async function saveGithubToken(token: string): Promise<void> {
+  const p = githubAuthConfigPath()
+  const safe = token.trim()
+  if (!safe) {
+    await clearGithubToken()
+    return
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    // 若系统不支持加密（极少见），退化为不保存，避免明文落盘
+    throw new Error('当前系统不支持安全加密存储（safeStorage 不可用）')
+  }
+  const enc = safeStorage.encryptString(safe).toString('base64')
+  await writeFileAsync(p, JSON.stringify({ v: 1, enc }, null, 2), 'utf-8')
+}
+
+async function clearGithubToken(): Promise<void> {
+  const p = githubAuthConfigPath()
+  try {
+    if (existsSync(p)) await unlink(p)
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * 可写的输出根目录。打包后从 Finder 启动时 process.cwd() 可能为 /，故改用 userData/output。
@@ -824,6 +878,22 @@ ipcMain.handle('get-r-package-update-list', async () => {
   }
 })
 
+ipcMain.handle('get-github-token', async () => {
+  const token = await loadGithubToken()
+  return { success: true, token: token ? '***' : '' }
+})
+
+ipcMain.handle('set-github-token', async (_, token: string) => {
+  if (typeof token !== 'string') return { success: false, error: 'token 必须是字符串' }
+  const t = token.trim()
+  if (!t) {
+    await clearGithubToken()
+    return { success: true }
+  }
+  await saveGithubToken(t)
+  return { success: true }
+})
+
 ipcMain.handle('install-r-package-from-github', async (_, repo: string) => {
   if (!repo || typeof repo !== 'string' || !/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repo.trim())) {
     return { success: false, error: '无效的 GitHub 仓库格式，应为 owner/repo' }
@@ -845,6 +915,13 @@ ipcMain.handle('install-r-package-from-github', async (_, repo: string) => {
       const child = spawn(rscriptPath, [file], {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
+        env: {
+          ...process.env,
+          ...(await (async () => {
+            const tok = await loadGithubToken()
+            return tok ? { GITHUB_PAT: tok } : {}
+          })()),
+        },
       })
       let stderr = ''
       child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })

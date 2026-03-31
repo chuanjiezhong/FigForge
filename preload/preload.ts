@@ -123,6 +123,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('get-r-package-update-list'),
   installRPackageFromGitHub: (repo: string) =>
     ipcRenderer.invoke('install-r-package-from-github', repo),
+  getGitHubToken: () =>
+    ipcRenderer.invoke('get-github-token'),
+  setGitHubToken: (token: string) =>
+    ipcRenderer.invoke('set-github-token', token),
 
   // 运行记录
   getRunHistory: (limit?: number) =>

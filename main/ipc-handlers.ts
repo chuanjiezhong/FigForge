@@ -16,11 +16,11 @@ import {
   addExternalPipelineDir,
   removeExternalPipelineDir 
 } from './r-engine/pipeline-config'
-import { readFile, writeFile, copyFile, readdir, unlink } from 'fs/promises'
-import { existsSync } from 'fs'
+import { readFile, writeFile, copyFile, readdir, unlink, mkdtemp, rm } from 'fs/promises'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { mkdir } from 'fs/promises'
-import { homedir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { convertPdfToImage } from './utils/pdf-to-image'
 
 const rProcessor = new RProcessor()
@@ -836,23 +836,36 @@ ipcMain.handle('install-r-package-from-github', async (_, repo: string) => {
     `remotes::install_github("${repoEscaped}", upgrade = "always")`,
   ].join('\n')
   return new Promise<{ success: boolean; error?: string }>((resolve) => {
-    const rscriptPath = getRscriptPath()
-    const child = spawn(rscriptPath, ['-e', rCode], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-    let stderr = ''
-    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
-    child.stdout?.on('data', (d: Buffer) => { stderr += d.toString() })
-    child.on('close', (code: number) => {
-      if (code === 0) {
-        resolve({ success: true })
-      } else {
-        resolve({ success: false, error: stderr || `R 进程退出码 ${code}` })
+    void (async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'figforge-r-'))
+      const file = join(dir, 'install_github.R')
+      await writeFile(file, rCode, 'utf-8')
+
+      const rscriptPath = getRscriptPath()
+      const child = spawn(rscriptPath, [file], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      })
+      let stderr = ''
+      child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+      child.stdout?.on('data', (d: Buffer) => { stderr += d.toString() })
+      const cleanup = async () => {
+        try {
+          await rm(dir, { recursive: true, force: true })
+        } catch {
+          /* ignore */
+        }
       }
-    })
-    child.on('error', (err: Error) => {
-      resolve({ success: false, error: err.message })
-    })
+      child.on('close', (code: number) => {
+        void cleanup().finally(() => {
+          if (code === 0) resolve({ success: true })
+          else resolve({ success: false, error: stderr || `R 进程退出码 ${code}` })
+        })
+      })
+      child.on('error', (err: Error) => {
+        void cleanup().finally(() => resolve({ success: false, error: err.message }))
+      })
+    })().catch((err) => resolve({ success: false, error: err?.message || String(err) }))
   })
 })
 

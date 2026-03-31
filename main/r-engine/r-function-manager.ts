@@ -1,6 +1,8 @@
 import { spawn, ChildProcess } from 'child_process'
 import { join } from 'path'
 import { getRscriptPath } from './rscript-path'
+import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
 
 /**
  * R 函数信息
@@ -72,6 +74,49 @@ export class RFunctionManager {
   private escapeRString(s: string) {
     // 统一把 Windows 路径分隔符转成 /，并转义双引号，避免破坏 R 字符串
     return s.replace(/\\/g, '/').replace(/"/g, '\\"')
+  }
+
+  /**
+   * Windows 打包环境下，`Rscript -e "<multiline script>"` 容易因命令行长度/引号/编码导致
+   * `Error: unexpected end of input` 等解析问题。
+   *
+   * 统一改为：写入临时 .R 文件，再执行 `Rscript <file>`。
+   */
+  private async runRScriptText(rScript: string): Promise<{ code: number; stdout: string; stderr: string }> {
+    const dir = await mkdtemp(join(tmpdir(), 'figforge-r-'))
+    const file = join(dir, 'script.R')
+    await writeFile(file, rScript, 'utf-8')
+
+    const rscriptPath = getRscriptPath()
+    return await new Promise((resolve, reject) => {
+      const proc = spawn(rscriptPath, [file], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: this.getUTF8Env(),
+        windowsHide: true,
+      })
+
+      let stdout = ''
+      let stderr = ''
+      proc.stdout?.on('data', (d) => (stdout += d.toString()))
+      proc.stderr?.on('data', (d) => (stderr += d.toString()))
+
+      proc.on('close', async (code) => {
+        try {
+          await rm(dir, { recursive: true, force: true })
+        } catch {
+          /* ignore */
+        }
+        resolve({ code: code ?? 1, stdout, stderr })
+      })
+      proc.on('error', async (err) => {
+        try {
+          await rm(dir, { recursive: true, force: true })
+        } catch {
+          /* ignore */
+        }
+        reject(err)
+      })
+    })
   }
 
   private decodeUnicodeTokensInString(input: string): string {
@@ -410,39 +455,20 @@ export class RFunctionManager {
         cat(jsonlite::toJSON(result, auto_unbox = TRUE))
       `
 
-      const rscriptPath = getRscriptPath()
-      const rProcess = spawn(rscriptPath, ['-e', rScript], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: this.getUTF8Env(),
-      })
-
-      let output = ''
-      let errorOutput = ''
-
-      rProcess.stdout?.on('data', (data) => {
-        output += data.toString()
-      })
-
-      rProcess.stderr?.on('data', (data) => {
-        errorOutput += data.toString()
-      })
-
-      rProcess.on('close', (code) => {
-        if (code === 0) {
-          try {
-            const functions = JSON.parse(output) as RFunctionInfo[]
-            resolve(functions)
-          } catch (error) {
-            reject(new Error(`Failed to parse R output: ${error}`))
+      this.runRScriptText(rScript)
+        .then(({ code, stdout, stderr }) => {
+          if (code === 0) {
+            try {
+              const functions = JSON.parse(stdout) as RFunctionInfo[]
+              resolve(functions)
+            } catch (error) {
+              reject(new Error(`Failed to parse R output: ${error}`))
+            }
+          } else {
+            reject(new Error(`R script failed: ${stderr}`))
           }
-        } else {
-          reject(new Error(`R script failed: ${errorOutput}`))
-        }
-      })
-
-      rProcess.on('error', (error) => {
-        reject(error)
-      })
+        })
+        .catch(reject)
     })
   }
 
@@ -490,39 +516,20 @@ export class RFunctionManager {
         cat(jsonlite::toJSON(result, auto_unbox = TRUE))
       `
 
-      const rscriptPath = getRscriptPath()
-      const rProcess = spawn(rscriptPath, ['-e', rScript], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: this.getUTF8Env(),
-      })
-
-      let output = ''
-      let errorOutput = ''
-
-      rProcess.stdout?.on('data', (data) => {
-        output += data.toString()
-      })
-
-      rProcess.stderr?.on('data', (data) => {
-        errorOutput += data.toString()
-      })
-
-      rProcess.on('close', (code) => {
-        if (code === 0) {
-          try {
-            const functions = JSON.parse(output) as RFunctionInfo[]
-            resolve(functions)
-          } catch (error) {
-            reject(new Error(`Failed to parse R output: ${error}`))
+      this.runRScriptText(rScript)
+        .then(({ code, stdout, stderr }) => {
+          if (code === 0) {
+            try {
+              const functions = JSON.parse(stdout) as RFunctionInfo[]
+              resolve(functions)
+            } catch (error) {
+              reject(new Error(`Failed to parse R output: ${error}`))
+            }
+          } else {
+            reject(new Error(`R script failed: ${stderr}`))
           }
-        } else {
-          reject(new Error(`R script failed: ${errorOutput}`))
-        }
-      })
-
-      rProcess.on('error', (error) => {
-        reject(error)
-      })
+        })
+        .catch(reject)
     })
   }
 
@@ -695,40 +702,19 @@ export class RFunctionManager {
         }
       `
 
-      const rscriptPath = getRscriptPath()
-      const rProcess = spawn(rscriptPath, ['-e', rScript], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: this.getUTF8Env(),
-      })
-
-      let output = ''
-      let errorOutput = ''
-
-      rProcess.stdout?.on('data', (data) => {
-        output += data.toString()
-      })
-
-      rProcess.stderr?.on('data', (data) => {
-        errorOutput += data.toString()
-      })
-
-      rProcess.on('close', (code) => {
-        // 即使返回码不为0，如果有输出也尝试使用
-        if (output.trim().length > 0) {
-          resolve(output.trim())
-        } else if (code === 0) {
-          // 如果返回码为0但没有输出，可能是真的没有文档
-          resolve('暂无文档')
-        } else {
-          // 有错误且没有输出
-          console.error('R script error:', errorOutput)
-          reject(new Error(`Failed to get documentation: ${errorOutput || 'Unknown error'}`))
-        }
-      })
-
-      rProcess.on('error', (error) => {
-        reject(error)
-      })
+      this.runRScriptText(rScript)
+        .then(({ code, stdout, stderr }) => {
+          // 即使返回码不为0，如果有输出也尝试使用
+          if (stdout.trim().length > 0) {
+            resolve(stdout.trim())
+          } else if (code === 0) {
+            resolve('暂无文档')
+          } else {
+            console.error('R script error:', stderr)
+            reject(new Error(`Failed to get documentation: ${stderr || 'Unknown error'}`))
+          }
+        })
+        .catch(reject)
     })
   }
 
@@ -755,36 +741,19 @@ export class RFunctionManager {
         cat(jsonlite::toJSON(result, auto_unbox = TRUE, null = "null"))
       `
 
-      const rscriptPath = getRscriptPath()
-      const rProcess = spawn(rscriptPath, ['-e', rScript], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: this.getUTF8Env(),
-      })
-
-      let output = ''
-      let errorOutput = ''
-
-      rProcess.stdout?.on('data', (data) => {
-        output += data.toString()
-      })
-
-      rProcess.stderr?.on('data', (data) => {
-        errorOutput += data.toString()
-      })
-
-      rProcess.on('close', (code) => {
-        if (code === 0) {
-          try {
-            resolve(JSON.parse(output) as T)
-          } catch (e) {
-            reject(new Error(`Failed to parse R JSON output: ${String(e)}\nraw=${output}`))
+      this.runRScriptText(rScript)
+        .then(({ code, stdout, stderr }) => {
+          if (code === 0) {
+            try {
+              resolve(JSON.parse(stdout) as T)
+            } catch (e) {
+              reject(new Error(`Failed to parse R JSON output: ${String(e)}\nraw=${stdout}`))
+            }
+          } else {
+            reject(new Error(`R script failed: ${stderr}`))
           }
-        } else {
-          reject(new Error(`R script failed: ${errorOutput}`))
-        }
-      })
-
-      rProcess.on('error', (error) => reject(error))
+        })
+        .catch(reject)
     })
   }
 }

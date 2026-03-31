@@ -109,6 +109,22 @@
   position: relative;
 }
 
+/* Windows 打包环境下，部分显卡/驱动会出现 ReactFlow 节点 hover 闪烁/“消失”。
+ * 通过避免背面渲染与提升合成稳定性来规避（不影响 macOS/Linux）。
+ */
+.composerGraph :global(.react-flow__renderer) {
+  overflow: visible;
+}
+.graph :global(.react-flow__renderer) {
+  overflow: visible;
+}
+.composerGraph :global(.react-flow__node),
+.graph :global(.react-flow__node) {
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+  will-change: transform;
+}
+
 .panel {
   width: 420px;
   min-width: 420px;

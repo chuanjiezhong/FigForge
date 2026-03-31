@@ -25,6 +25,90 @@
   border-right: 1px solid #f0f0f0;
 }
 
+.composerRow {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  min-width: 0;
+}
+
+.palette {
+  width: 280px;
+  min-width: 280px;
+  border-right: 1px solid #f0f0f0;
+  padding: 10px;
+  overflow: auto;
+  background: #fafafa;
+}
+
+.paletteToolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.paletteCategorySelect {
+  width: 100%;
+}
+
+.paletteCollapse {
+  background: transparent;
+}
+
+.paletteCollapse :global(.ant-collapse-item) {
+  border-bottom: 1px solid #eee;
+}
+
+.paletteCollapse :global(.ant-collapse-header) {
+  padding: 6px 0 !important;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.paletteTitle {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.paletteItem {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  cursor: grab;
+  user-select: none;
+}
+
+.paletteItem:active {
+  cursor: grabbing;
+}
+
+.paletteItemId {
+  font-size: 11px;
+  font-weight: 600;
+  color: #333;
+}
+
+.paletteItemName {
+  font-size: 11px;
+  color: #666;
+  margin-top: 2px;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.composerGraph {
+  flex: 1;
+  min-width: 0;
+  min-height: 320px;
+  position: relative;
+}
+
 .panel {
   width: 420px;
   min-width: 420px;
@@ -48,6 +132,9 @@
   font-size: 11px;
   color: #666;
   margin-top: 2px;
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 @keyframes dotBlink {
@@ -58,6 +145,20 @@
 .nodeLabel {
   position: relative;
   padding-right: 10px;
+}
+
+.nodeConnectSource {
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.28);
+}
+
+.nodeConnectableTarget {
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.55);
+}
+
+.nodeNotConnectableTarget {
+  opacity: 0.35;
+  filter: grayscale(0.15);
+  cursor: not-allowed;
 }
 
 .statusDot {

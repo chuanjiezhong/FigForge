@@ -12,8 +12,8 @@ export type RunRecord = {
   error?: string
   /** 当次运行的参数（用于详情展示） */
   params?: Record<string, unknown>
-  /** `pipeline`：Pipeline 页一键流程；未填则视为普通函数运行（兼容旧数据） */
-  runKind?: 'function' | 'pipeline'
+  /** `pipeline`：Pipeline 页一键流程；`composer`：模块化单函数串联；未填则视为普通函数运行（兼容旧数据） */
+  runKind?: 'function' | 'pipeline' | 'composer'
   /** 成功生成时写入，便于运行记录里直接打开解读稿路径 */
   interpretationPaths?: { zh?: string; en?: string; meta?: string }
   /** 用户在「运行记录」里补充的说明（可视为对解读稿的备注，不进 R 输出目录） */

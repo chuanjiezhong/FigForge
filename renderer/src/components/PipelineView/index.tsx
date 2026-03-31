@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { addRunRecord, newRunRecordId, updateRunRecord } from '../../stores/runHistoryStore'
 import {
   Button,
@@ -7,32 +7,45 @@ import {
   Input,
   InputNumber,
   message,
+  Segmented,
   Select,
   Space,
   Spin,
   Switch,
   Typography,
 } from 'antd'
-import ReactFlow, { Background, Controls, type Edge, type Node, type ReactFlowInstance } from 'reactflow'
+import ReactFlow, {
+  addEdge,
+  Background,
+  Controls,
+  useEdgesState,
+  useNodesState,
+  type Edge,
+  type Node,
+  type ReactFlowInstance,
+} from 'reactflow'
 import 'reactflow/dist/style.css'
 import dagre from 'dagre'
 import type { ParameterInfo } from '../../types/pipeline'
 import { ParameterForm, type ParameterFormValue } from '../SharedParameterForm'
 import InterpretationDocModal from '../InterpretationDocModal'
+import { PipelineComposerCanvas } from './PipelineComposerCanvas'
+import type { ComposerModuleDef, PipelineDefs } from './pipelineComposerTypes'
+import {
+  applyUpstreamOutputsToParams,
+  findModuleDef,
+  firstFn,
+  inferModuleOutputs,
+  moduleDisplayTitle,
+  newComposerNodeId,
+  runRScriptAndWait,
+  topologicalOrderTemplates,
+  type ComposerNodeData,
+  type ModuleOutputs,
+} from './pipelineComposerUtils'
 import styles from './index.module.less'
 
 const { Text } = Typography
-
-type PipelineStepDef = {
-  step_id: string
-  name: string
-  config_key?: string
-  fn?: string | string[]
-  overridable_params?: string[]
-  outputs_keys?: string[]
-}
-
-type PipelineDefs = Record<string, { pipeline_name: string; steps: PipelineStepDef[] }>
 
 const UNICODE_TOKEN_RE = /<U\+([0-9A-Fa-f]{4,6})>/g
 function decodeUnicodeTokensInString(input: string): string {
@@ -42,6 +55,16 @@ function decodeUnicodeTokensInString(input: string): string {
     if (!Number.isFinite(codePoint)) return _
     return String.fromCodePoint(codePoint)
   })
+}
+
+function isComposerAtomicModule(name: string, description?: string): boolean {
+  const n = name.trim().toLowerCase()
+  const d = (description ?? '').trim()
+  if (!n) return false
+  if (n.startsWith('transcriptome_redraw_')) return false
+  if (n.includes('pipeline')) return false
+  if (/[一二三四五六七八九十]?键流程/.test(d) || d.includes('流程：')) return false
+  return true
 }
 
 function decodeUnicodeTokensDeep<T>(value: T): T {
@@ -55,16 +78,6 @@ function decodeUnicodeTokensDeep<T>(value: T): T {
     return out as T
   }
   return value
-}
-
-function asArray(x: string | string[] | undefined): string[] {
-  if (!x) return []
-  return Array.isArray(x) ? x : [x]
-}
-
-function firstFn(step: PipelineStepDef): string | null {
-  const fns = asArray(step.fn)
-  return fns.length ? fns[0] : null
 }
 
 type StepRunStatus = 'running' | 'success' | 'failed'
@@ -357,10 +370,19 @@ export default function PipelineView() {
   const [stepStatusMap, setStepStatusMap] = useState<Record<string, StepStatus>>({})
   const pollingRef = useRef<number | null>(null)
   const rfRef = useRef<ReactFlowInstance | null>(null)
+  const composerRfRef = useRef<ReactFlowInstance | null>(null)
   /** 当前次 Pipeline 运行对应「运行记录」id，用于成功/失败后回写 */
   const pipelineRunIdRef = useRef<string | null>(null)
 
-  const steps = defs?.[pipelineName]?.steps ?? []
+  const [uiMode, setUiMode] = useState<'classic' | 'composer'>('classic')
+  const [composerSelectedId, setComposerSelectedId] = useState<string | null>(null)
+  const [compNodes, setCompNodes, onCompNodesChange] = useNodesState<ComposerNodeData>([])
+  const [compEdges, setCompEdges, onCompEdgesChange] = useEdgesState([])
+  const [composerModules, setComposerModules] = useState<ComposerModuleDef[]>([])
+  const [composerLeftCollapsed, setComposerLeftCollapsed] = useState(true)
+  const [composerRightCollapsed, setComposerRightCollapsed] = useState(true)
+
+  const steps = useMemo(() => defs?.[pipelineName]?.steps ?? [], [defs, pipelineName])
   const selectedStep = steps.find((s) => s.step_id === selectedStepId) ?? null
 
   // 位置只由 steps 决定：避免状态轮询导致重算位置引发“错位/跳动”
@@ -517,7 +539,7 @@ export default function PipelineView() {
       }
     }, 50)
     return () => window.clearTimeout(t)
-  }, [pipelineName, steps.length])
+  }, [pipelineName, steps])
 
   // 运行时：轮询 status JSON，更新节点状态并自动选中当前 step
   useEffect(() => {
@@ -598,6 +620,215 @@ export default function PipelineView() {
     return list
   }, [selectedStep, stepDocs, overridableParams, pipelineName])
 
+  const selectedComposerNode = useMemo(
+    () => compNodes.find((n) => n.id === composerSelectedId) ?? null,
+    [compNodes, composerSelectedId]
+  )
+  const selectedComposerModule = useMemo(
+    () => (selectedComposerNode ? findModuleDef(composerModules, selectedComposerNode.data.moduleKey) : undefined),
+    [selectedComposerNode, composerModules]
+  )
+  const composerStepParams: ParameterInfo[] = useMemo(() => {
+    if (!selectedComposerModule) return []
+    return stepDocs[selectedComposerModule.key] ?? []
+  }, [selectedComposerModule, stepDocs])
+
+  const recommendNextModules = useMemo(() => {
+    if (!selectedComposerModule) return []
+    const produces = selectedComposerModule.io?.produces ?? []
+    if (!produces.length) return []
+    const picked = composerModules.filter((m) => {
+      const consumes = m.io?.consumes ?? []
+      if (!consumes.length) return false
+      return consumes.some((c) => produces.includes(c))
+    })
+    return picked.slice(0, 12)
+  }, [selectedComposerModule, composerModules])
+
+  const canConnectModuleDefs = useCallback(
+    (srcMod: ComposerModuleDef, tgtMod: ComposerModuleDef): { ok: boolean; reason?: string; auto?: boolean } => {
+      const produces = srcMod.io?.produces ?? []
+      const consumes = tgtMod.io?.consumes ?? []
+      if (!consumes.length) return { ok: true }
+      if (!produces.length) return { ok: false, reason: `上游「${srcMod.title}」未声明产物类型` }
+      if (consumes.some((c) => produces.includes(c))) return { ok: true }
+
+      // 自动补链白名单：expr_norm_file -> deg_table_file（通过 heatmap_limma 产出）
+      if (consumes.includes('deg_table_file') && produces.includes('expr_norm_file')) {
+        return { ok: true, auto: true, reason: '将自动补链：先执行差异分析，再把 deg_table 传给下游' }
+      }
+
+      return {
+        ok: false,
+        reason: `不兼容：上游产物 [${produces.join(', ')}] 不能满足下游输入 [${consumes.join(', ')}]`,
+      }
+    },
+    []
+  )
+
+  const checkComposerConnection = useMemo(
+    () => (sourceId: string, targetId: string): { ok: boolean; reason?: string; auto?: boolean } => {
+      const srcNode = compNodes.find((n) => n.id === sourceId)
+      const tgtNode = compNodes.find((n) => n.id === targetId)
+      if (!srcNode || !tgtNode) return { ok: false, reason: '未找到节点信息' }
+      const srcMod = composerModules.find((m) => m.key === srcNode.data.moduleKey)
+      const tgtMod = composerModules.find((m) => m.key === tgtNode.data.moduleKey)
+      if (!srcMod || !tgtMod) return { ok: false, reason: '未找到模块定义' }
+      return canConnectModuleDefs(srcMod, tgtMod)
+    },
+    [compNodes, composerModules, canConnectModuleDefs]
+  )
+
+  const handleAddRecommendedModule = useCallback(
+    (m: ComposerModuleDef) => {
+      if (!selectedComposerNode || !selectedComposerModule) return
+      const chk = canConnectModuleDefs(selectedComposerModule, m)
+      if (!chk.ok) {
+        message.warning(chk.reason ?? '无法连接该模块')
+        return
+      }
+      if (chk.auto && chk.reason) {
+        message.info(chk.reason)
+      }
+      const srcId = selectedComposerNode.id
+      const srcNode = compNodes.find((n) => n.id === srcId)
+      if (!srcNode) return
+      const downstreamTargets = compEdges.filter((e) => e.source === srcId).map((e) => e.target)
+      const downstreamYs = downstreamTargets
+        .map((tid) => compNodes.find((n) => n.id === tid)?.position.y)
+        .filter((y): y is number => typeof y === 'number')
+      const maxDownY = downstreamYs.length ? Math.max(...downstreamYs) : -Infinity
+      const baseY = Math.max(srcNode.position.y, maxDownY)
+      const pos = { x: srcNode.position.x, y: baseY + 120 }
+
+      const newId = newComposerNodeId()
+      const newNode: Node<ComposerNodeData> = {
+        id: newId,
+        position: pos,
+        data: {
+          moduleKey: m.key,
+          functionName: m.functionName,
+          title: m.title,
+          subtitle: m.functionName,
+          params: {},
+          label: (
+            <div className={styles.nodeLabel}>
+              <div className={styles.nodeTitle}>{m.title}</div>
+              <div className={styles.nodeSub}>{m.functionName}</div>
+            </div>
+          ),
+        },
+        style: {
+          border: '1px solid #d9d9d9',
+          borderRadius: 10,
+          padding: 8,
+          background: '#fff',
+          width: DAGRE_NODE_WIDTH,
+        },
+      }
+      setCompNodes((ns) => [...ns, newNode])
+      setCompEdges((eds) =>
+        addEdge(
+          {
+            id: `${srcId}->${newId}`,
+            source: srcId,
+            target: newId,
+            animated: true,
+            style: { stroke: '#1677ff', strokeWidth: 2 },
+          },
+          eds
+        )
+      )
+      setComposerSelectedId(newId)
+    },
+    [
+      selectedComposerNode,
+      selectedComposerModule,
+      compNodes,
+      compEdges,
+      canConnectModuleDefs,
+      setCompNodes,
+      setCompEdges,
+    ]
+  )
+
+  useEffect(() => {
+    if (uiMode !== 'composer') return
+    let cancelled = false
+    void window.electronAPI.getAllFunctionDocs().then((res) => {
+      if (cancelled || !res.success || !Array.isArray(res.docs)) return
+      const docs = res.docs as Array<{
+        name: string
+        package?: string
+        description?: string
+        category?: string
+        detailedParameters?: Array<{ name: string }>
+        io?: {
+          consumes?: string[]
+          produces?: string[]
+          bindings?: Record<string, string>
+        }
+      }>
+      const modules = docs
+        .filter((d) =>
+          d.package === 'OmicsFlowCoreFullVersion' &&
+          isComposerAtomicModule(d.name, d.description)
+        )
+        .map((d) => {
+          const rawCat = typeof d.category === 'string' ? d.category.trim() : ''
+          const category =
+            rawCat ||
+            (d.name.startsWith('transcriptome_')
+              ? 'transcriptomics'
+              : d.name.startsWith('metabolome_') || d.name.startsWith('metabolomics_')
+                ? 'metabolomics'
+                : 'uncategorized')
+          return {
+            key: d.name,
+            functionName: d.name,
+            title: moduleDisplayTitle(d.description, d.name),
+            description: d.description,
+            category,
+            packageName: d.package,
+            parameters: Array.isArray(d.detailedParameters) ? d.detailedParameters.map((p) => p.name) : [],
+            io: d.io,
+          }
+        }) as ComposerModuleDef[]
+      setComposerModules(modules)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [uiMode])
+
+  useEffect(() => {
+    if (uiMode !== 'composer' || !composerRfRef.current || compNodes.length === 0) return
+    const t = window.setTimeout(() => {
+      try {
+        composerRfRef.current?.fitView({ padding: 0.12, includeHiddenNodes: true })
+      } catch {
+        /* ignore */
+      }
+    }, 60)
+    return () => window.clearTimeout(t)
+  }, [uiMode, compNodes.length])
+
+  useEffect(() => {
+    if (uiMode !== 'composer' || !selectedComposerModule) return
+    const sid = selectedComposerModule.key
+    const fn = selectedComposerModule.functionName
+    if (!fn) return
+    if (stepDocs[sid]) return
+
+    window.electronAPI
+      .getRFunctionDoc(fn, 'OmicsFlowCoreFullVersion')
+      .then((res) => {
+        if (!res.success || !Array.isArray(res.detailedParameters)) return
+        setStepDocs((prev) => ({ ...prev, [sid]: res.detailedParameters as ParameterInfo[] }))
+      })
+      .catch(() => {})
+  }, [uiMode, selectedComposerModule, stepDocs])
+
   const pipelineParams: ParameterInfo[] = useMemo(() => {
     const base = globalDocs[pipelineName] ?? []
     // config 与 ... 不在面板里直接展示（config 由流程图节点生成）
@@ -654,6 +885,279 @@ export default function PipelineView() {
 
     return filtered
   }, [globalDocs, pipelineName])
+
+  const loadDefaultComposerChain = () => {
+    const preferred = [
+      'transcriptome_read_expr_matrix',
+      'transcriptome_normalize_matrix',
+      'transcriptome_plot_heatmap_limma',
+    ]
+    const pick = preferred.map((fn) => composerModules.find((m) => m.functionName === fn)).filter(Boolean)
+    if (pick.length < 3) {
+      message.warning('模块库尚未准备好，无法载入默认链')
+      return
+    }
+    const stepsTriple = pick as ComposerModuleDef[]
+    const positions = [
+      { x: 80, y: 20 },
+      { x: 80, y: 140 },
+      { x: 80, y: 260 },
+    ]
+    const newNodes: Node<ComposerNodeData>[] = stepsTriple.map((step, i) => {
+      const id = newComposerNodeId()
+      return {
+        id,
+        position: positions[i],
+        data: {
+          moduleKey: step.key,
+          functionName: step.functionName,
+          title: step.title,
+          subtitle: step.functionName,
+          params: {},
+          label: (
+            <div className={styles.nodeLabel}>
+              <div className={styles.nodeTitle}>{step.title}</div>
+              <div className={styles.nodeSub}>{step.functionName}</div>
+            </div>
+          ),
+        },
+        style: {
+          border: '1px solid #d9d9d9',
+          borderRadius: 10,
+          padding: 8,
+          background: '#fff',
+          width: DAGRE_NODE_WIDTH,
+        },
+      }
+    })
+    setCompNodes(newNodes)
+    setCompEdges([
+      {
+        id: `${newNodes[0].id}->${newNodes[1].id}`,
+        source: newNodes[0].id,
+        target: newNodes[1].id,
+        animated: true,
+        style: { stroke: '#1677ff', strokeWidth: 2 },
+      },
+      {
+        id: `${newNodes[1].id}->${newNodes[2].id}`,
+        source: newNodes[1].id,
+        target: newNodes[2].id,
+        animated: true,
+        style: { stroke: '#1677ff', strokeWidth: 2 },
+      },
+    ])
+    setComposerSelectedId(newNodes[0].id)
+  }
+
+  const clearComposerCanvas = () => {
+    setCompNodes([])
+    setCompEdges([])
+    setComposerSelectedId(null)
+  }
+
+  const handleRunComposer = async () => {
+    try {
+      if (running) return
+      if (compNodes.length === 0) {
+        message.error('请先从左侧拖入至少一个模块')
+        return
+      }
+      const orderResult = topologicalOrderTemplates(compNodes, compEdges)
+      if (typeof orderResult === 'object' && 'error' in orderResult) {
+        message.error(orderResult.error)
+        return
+      }
+      const order = orderResult as string[]
+
+      const globalValues: Record<string, unknown> = {}
+
+      const outputsByNode: Record<string, ModuleOutputs> = {}
+
+      const userOutDir = (globalValues?.out_dir ?? globalValues?.outDir) as string | undefined
+      const recordOutDir =
+        typeof userOutDir === 'string' && userOutDir.trim() !== '' && userOutDir.trim() !== '.'
+          ? userOutDir.trim()
+          : '.'
+
+      setRunning(true)
+      setInterpretation(null)
+      setRunOutputDir(recordOutDir !== '.' ? recordOutDir : null)
+
+      const jobStartedAt = Date.now()
+      const runId = newRunRecordId(jobStartedAt)
+      pipelineRunIdRef.current = runId
+
+      const nodeFnList = order
+        .map((id) => {
+          const n = compNodes.find((x) => x.id === id)
+          return n?.data.functionName || '?'
+        })
+        .join(' → ')
+
+      addRunRecord({
+        id: runId,
+        functionName: `composer:${nodeFnList}`,
+        packageName: 'OmicsFlowCoreFullVersion',
+        startedAt: jobStartedAt,
+        status: 'running',
+        outputDir: recordOutDir,
+        script: '',
+        params: { uiMode: 'composer', order, globalValues, nodeTemplates: compNodes.map((n) => n.data.functionName) },
+        runKind: 'composer',
+      })
+
+      const collectOutputs = async (
+        fn: string,
+        params: Record<string, unknown>,
+        baseOutThis: string
+      ): Promise<ModuleOutputs> => {
+        const guessed = inferModuleOutputs(fn, params, baseOutThis)
+        const read = await window.electronAPI.readFile(`${baseOutThis.replace(/\\/g, '/')}/_artifacts.json`)
+        if (!read.success || !read.content) return guessed
+        try {
+          const parsed = JSON.parse(read.content) as {
+            function_name?: string
+            artifacts?: Record<string, unknown>
+          }
+          if (!parsed || typeof parsed !== 'object' || !parsed.artifacts) return guessed
+          if (parsed.function_name && parsed.function_name !== fn) return guessed
+          return { ...guessed, ...(parsed.artifacts as ModuleOutputs) }
+        } catch {
+          return guessed
+        }
+      }
+
+      const runOne = async (
+        fn: string,
+        params: Record<string, unknown>,
+        titleForErr: string
+      ): Promise<{ ok: boolean; baseOut?: string; outputs?: ModuleOutputs; error?: string }> => {
+        const gen = await window.electronAPI.generateRFunctionScript(fn, 'OmicsFlowCoreFullVersion', params, [])
+        if (!gen.success || !gen.outputDir || !gen.script) {
+          return { ok: false, error: gen.error || `生成脚本失败：${titleForErr}` }
+        }
+        const baseOutThis =
+          typeof userOutDir === 'string' && userOutDir.trim() !== '' && userOutDir.trim() !== '.'
+            ? userOutDir.trim().replace(/\\/g, '/')
+            : gen.outputDir.replace(/\\/g, '/')
+        setRunOutputDir(baseOutThis)
+        const result = await runRScriptAndWait(gen.outputDir, gen.script)
+        if (!result.success) {
+          return { ok: false, error: result.error || `执行失败：${titleForErr}` }
+        }
+        const outputs = await collectOutputs(fn, params, baseOutThis)
+        return { ok: true, baseOut: baseOutThis, outputs }
+      }
+
+      for (const nodeId of order) {
+        const node = compNodes.find((n) => n.id === nodeId)
+        if (!node) continue
+        const fn = node.data.functionName
+        if (!fn) {
+          message.error(`节点 ${node.data.title} 未绑定 R 函数`)
+          updateRunRecord(runId, { status: 'error', finishedAt: Date.now(), error: '节点未绑定函数' })
+          setRunning(false)
+          pipelineRunIdRef.current = null
+          return
+        }
+
+        let params: Record<string, unknown> = { ...node.data.params }
+
+        const incoming = compEdges.find((e) => e.target === nodeId)
+        const upstream = incoming ? outputsByNode[incoming.source] : undefined
+        params = applyUpstreamOutputsToParams(fn, params, upstream)
+
+        // 自动补链 MVP：当目标是火山图且上游仅提供表达矩阵时，自动插入差异步骤（heatmap_limma）产出 deg_file
+        if (
+          fn === 'transcriptome_plot_volcano' &&
+          !params.expr_file &&
+          (upstream?.expr_file || upstream?.normalize_file) &&
+          !upstream?.deg_file
+        ) {
+          const exprInput = upstream.normalize_file ?? upstream.expr_file
+          const autoDegOutDir =
+            typeof userOutDir === 'string' && userOutDir.trim() !== '' && userOutDir.trim() !== '.'
+              ? userOutDir.trim()
+              : undefined
+          const autoDegParams: Record<string, unknown> = {
+            expr_file: exprInput,
+            out_dir: autoDegOutDir ?? '.',
+            contrast: ['Control', 'Disease'],
+            save_rds: false,
+            show_gene_names: false,
+          }
+          const autoDeg = await runOne('transcriptome_plot_heatmap_limma', autoDegParams, '自动补链：差异分析')
+          if (!autoDeg.ok) {
+            const err = autoDeg.error || '自动补链失败'
+            updateRunRecord(runId, { status: 'error', finishedAt: Date.now(), error: err })
+            message.error(err)
+            setRunning(false)
+            pipelineRunIdRef.current = null
+            return
+          }
+          outputsByNode[nodeId] = { ...(outputsByNode[nodeId] || {}), ...(autoDeg.outputs || {}) }
+          params = applyUpstreamOutputsToParams(fn, params, outputsByNode[nodeId])
+        }
+
+        // PCA 允许单数据集，但至少需要有表达矩阵输入（input_file）
+        if (fn === 'transcriptome_plot_pca' && !params.input_file) {
+          params = applyUpstreamOutputsToParams(fn, params, upstream)
+          if (!params.input_file) {
+            const err = 'PCA 缺少 input_file：请连线到能产出表达矩阵的上游模块，或手动填写 input_file'
+            updateRunRecord(runId, { status: 'error', finishedAt: Date.now(), error: err })
+            message.error(err)
+            setRunning(false)
+            pipelineRunIdRef.current = null
+            return
+          }
+        }
+
+        // 兼容旧参数名：部分链路会把表达矩阵放在 expr_file（如标准化输出）
+        // 但 transcriptome_plot_pca() 使用 input_file 参数名；若继续带 expr_file 会触发 R 的 unused argument
+        if (fn === 'transcriptome_plot_pca') {
+          if (!params.input_file && typeof params.expr_file === 'string' && params.expr_file.trim()) {
+            params.input_file = params.expr_file.trim()
+          }
+          if ('expr_file' in params) delete params.expr_file
+        }
+
+        const ran = await runOne(fn, params, node.data.title)
+        if (!ran.ok) {
+          const err = ran.error || '脚本失败'
+          updateRunRecord(runId, {
+            status: 'error',
+            finishedAt: Date.now(),
+            error: err === '分析已取消' ? '分析已取消' : err,
+          })
+          if (err !== '分析已取消') message.error(err)
+          else message.info('分析已取消')
+          setRunning(false)
+          pipelineRunIdRef.current = null
+          return
+        }
+        outputsByNode[nodeId] = { ...(outputsByNode[nodeId] || {}), ...(ran.outputs || {}) }
+      }
+
+      message.success('模块化流程执行完成')
+      updateRunRecord(runId, { status: 'success', finishedAt: Date.now() })
+      pipelineRunIdRef.current = null
+      setRunning(false)
+    } catch (e) {
+      if (e && typeof e === 'object' && 'errorFields' in (e as any)) return
+      const rid = pipelineRunIdRef.current
+      if (rid) {
+        pipelineRunIdRef.current = null
+        updateRunRecord(rid, {
+          status: 'error',
+          finishedAt: Date.now(),
+          error: (e as Error)?.message || '运行时出错',
+        })
+      }
+      message.error((e as Error)?.message || '运行时出错')
+      setRunning(false)
+    }
+  }
 
   const handleRun = async () => {
     try {
@@ -845,20 +1349,55 @@ export default function PipelineView() {
     <div className={styles.wrap}>
       <div className={styles.topBar}>
         <Text strong>Pipeline</Text>
-        <Select
-          style={{ width: 360 }}
-          loading={loading}
-          value={pipelineName}
-          options={pipelineOptions}
-          onChange={(v) => setPipelineName(v)}
+        <Segmented
+          value={uiMode}
+          onChange={(v) => setUiMode(v as 'classic' | 'composer')}
+          options={[
+            { label: '经典一键', value: 'classic' },
+            { label: '模块化编排', value: 'composer' },
+          ]}
           disabled={running}
         />
-        <Button type="primary" onClick={handleRun} disabled={loading || !defs || running}>
-          {running ? '运行中…' : '运行 Pipeline'}
+        {uiMode === 'classic' ? (
+          <Select
+            style={{ width: 360 }}
+            loading={loading}
+            value={pipelineName}
+            options={pipelineOptions}
+            onChange={(v) => setPipelineName(v)}
+            disabled={running}
+          />
+        ) : (
+          <Text type="secondary" style={{ maxWidth: 420, fontSize: 12 }}>
+            不调用包装函数；按画布顺序依次执行各节点对应 R 单函数。连线仅允许「上一步→下一步」。expr 路径按 prefix/out_dir 自动衔接，若与 R 包实际文件名不一致请在节点表单里手动指定 expr_file。
+          </Text>
+        )}
+        <Button
+          type="primary"
+          onClick={() => (uiMode === 'classic' ? handleRun() : handleRunComposer())}
+          disabled={loading || !defs || running}
+        >
+          {running ? '运行中…' : uiMode === 'classic' ? '运行 Pipeline' : '运行模块化流程'}
         </Button>
         <Button onClick={handleCancel} disabled={!running}>
           取消
         </Button>
+        {uiMode === 'composer' && !running && (
+          <Space>
+            <Button size="small" onClick={() => setComposerLeftCollapsed((v) => !v)}>
+              {composerLeftCollapsed ? '展开左侧模块库' : '收起左侧模块库'}
+            </Button>
+            <Button size="small" onClick={() => setComposerRightCollapsed((v) => !v)}>
+              {composerRightCollapsed ? '展开右侧参数区' : '收起右侧参数区'}
+            </Button>
+            <Button size="small" onClick={loadDefaultComposerChain} disabled={composerModules.length < 3}>
+              载入默认三步骤
+            </Button>
+            <Button size="small" danger type="text" onClick={clearComposerCanvas}>
+              清空画布
+            </Button>
+          </Space>
+        )}
         {running && runOutputDir && (
           <Text type="secondary" style={{ fontSize: 12 }}>
             输出：{runOutputDir}
@@ -867,127 +1406,238 @@ export default function PipelineView() {
       </div>
 
       <div className={styles.main}>
-        <div className={styles.graph}>
-          {loading ? (
-            <div style={{ padding: 24 }}><Spin /></div>
-          ) : (
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onInit={(instance) => {
-                rfRef.current = instance
-                try {
-                  instance.fitView({ padding: 0.12, includeHiddenNodes: true })
-                } catch {
-                  // ignore
-                }
-              }}
-              onNodeClick={(_, node) => setSelectedStepId(String(node.id))}
-              defaultEdgeOptions={{ type: 'straight' }}
-              nodesDraggable={false}
-              nodesConnectable={false}
-              elementsSelectable={!running}
-            >
-              <Background />
-              <Controls />
-            </ReactFlow>
-          )}
-        </div>
-
-        <div className={styles.panel}>
-          <Card size="small" title="全局参数（Pipeline 入参）">
-            {pipelineParams.length === 0 &&
-            pipelineName !== 'transcriptome_pipeline_multi' &&
-            pipelineName !== 'transcriptome_pipeline_multi_any' ? (
-              <div className={styles.hint}>暂无可配置全局参数</div>
-            ) : (
-              <>
-                {pipelineParams.length > 0 && <ParameterForm form={globalForm} parameters={pipelineParams} />}
-                {(pipelineName === 'transcriptome_pipeline_multi_any' || pipelineName === 'transcriptome_pipeline_multi') && (
-                  <Form form={globalForm} layout="vertical" style={{ marginTop: 8 }}>
-                    {pipelineName === 'transcriptome_pipeline_multi_any' && <DatasetsBuilder form={globalForm} mode="any" />}
-                    {pipelineName === 'transcriptome_pipeline_multi' && <DatasetsBuilder form={globalForm} mode="geoOnly" />}
-                  </Form>
-                )}
-              </>
-            )}
-          </Card>
-
-          <div style={{ height: 12 }} />
-
-          <Card
-            size="small"
-            title={selectedStep ? `步骤参数：${selectedStep.step_id}` : '步骤参数'}
-          >
-            {!selectedStep ? (
-              <div className={styles.hint}>请点击左侧流程图节点</div>
-            ) : !selectedStep.config_key ? (
-              <div className={styles.hint}>该步骤未定义 config_key，暂不支持参数覆盖</div>
-            ) : selectedStepParams.length === 0 ? (
-              <div className={styles.hint}>该步骤暂无可覆盖参数（或尚未加载参数定义）</div>
-            ) : (
-              <>
-                {(pipelineName === 'transcriptome_pipeline_multi' && selectedStep.step_id === '01_geo_annotation') ||
-                (pipelineName === 'transcriptome_pipeline_multi_any' && selectedStep.step_id === '01_input_prepare') ? (
-                  <div className={styles.hint} style={{ marginBottom: 8 }}>
-                    本步输入来自上方「datasets」中每个数据集的 probe_file、ann_file 等；此处仅可覆盖 out_dir、prefix、overwrite 等。
-                  </div>
-                ) : null}
-                <div style={{ marginBottom: 8 }}>
-                  <Text type="secondary">{selectedStep.name}</Text>
+        {uiMode === 'classic' ? (
+          <>
+            <div className={styles.graph}>
+              {loading ? (
+                <div style={{ padding: 24 }}>
+                  <Spin />
                 </div>
-                <ParameterForm
-                  key={selectedStep.config_key}
-                  parameters={selectedStepParams}
-                  value={stepOverrides[selectedStep.config_key] || {}}
-                  onChange={(next) => {
-                    setStepOverrides((prev) => ({ ...prev, [selectedStep.config_key as string]: next }))
+              ) : (
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  onInit={(instance) => {
+                    rfRef.current = instance
+                    try {
+                      instance.fitView({ padding: 0.12, includeHiddenNodes: true })
+                    } catch {
+                      // ignore
+                    }
                   }}
-                />
-              </>
-            )}
-          </Card>
+                  onNodeClick={(_, node) => setSelectedStepId(String(node.id))}
+                  defaultEdgeOptions={{ type: 'straight' }}
+                  nodesDraggable={false}
+                  nodesConnectable={false}
+                  elementsSelectable={!running}
+                >
+                  <Background />
+                  <Controls />
+                </ReactFlow>
+              )}
+            </div>
 
-          {interpretation?.zhPath ? (
-            <>
+            <div className={styles.panel}>
+              <Card size="small" title="全局参数（Pipeline 入参）">
+                {pipelineParams.length === 0 &&
+                pipelineName !== 'transcriptome_pipeline_multi' &&
+                pipelineName !== 'transcriptome_pipeline_multi_any' ? (
+                  <div className={styles.hint}>暂无可配置全局参数</div>
+                ) : (
+                  <>
+                    {pipelineParams.length > 0 && <ParameterForm form={globalForm} parameters={pipelineParams} />}
+                    {(pipelineName === 'transcriptome_pipeline_multi_any' || pipelineName === 'transcriptome_pipeline_multi') && (
+                      <Form form={globalForm} layout="vertical" style={{ marginTop: 8 }}>
+                        {pipelineName === 'transcriptome_pipeline_multi_any' && <DatasetsBuilder form={globalForm} mode="any" />}
+                        {pipelineName === 'transcriptome_pipeline_multi' && <DatasetsBuilder form={globalForm} mode="geoOnly" />}
+                      </Form>
+                    )}
+                  </>
+                )}
+              </Card>
+
               <div style={{ height: 12 }} />
-              <Card size="small" title="结果解读（中英草稿）">
-                <Text type="secondary" style={{ display: 'block', marginBottom: 10 }}>
-                  由 OmicsFlowCore R 包在输出目录 <code>_pipeline/</code> 下自动生成；点击「文档视图」以纸张式阅读，便于对照修改后写入论文。
-                </Text>
-                <Space wrap>
-                  <Button type="primary" onClick={() => setInterpretModalOpen(true)}>
-                    文档视图
-                  </Button>
-                  <Button
-                    size="small"
-                    onClick={async () => {
-                      if (!interpretation.zhPath) return
+
+              <Card size="small" title={selectedStep ? `步骤参数：${selectedStep.step_id}` : '步骤参数'}>
+                {!selectedStep ? (
+                  <div className={styles.hint}>请点击左侧流程图节点</div>
+                ) : !selectedStep.config_key ? (
+                  <div className={styles.hint}>该步骤未定义 config_key，暂不支持参数覆盖</div>
+                ) : selectedStepParams.length === 0 ? (
+                  <div className={styles.hint}>该步骤暂无可覆盖参数（或尚未加载参数定义）</div>
+                ) : (
+                  <>
+                    {(pipelineName === 'transcriptome_pipeline_multi' && selectedStep.step_id === '01_geo_annotation') ||
+                    (pipelineName === 'transcriptome_pipeline_multi_any' && selectedStep.step_id === '01_input_prepare') ? (
+                      <div className={styles.hint} style={{ marginBottom: 8 }}>
+                        本步输入来自上方「datasets」中每个数据集的 probe_file、ann_file 等；此处仅可覆盖 out_dir、prefix、overwrite 等。
+                      </div>
+                    ) : null}
+                    <div style={{ marginBottom: 8 }}>
+                      <Text type="secondary">{selectedStep.name}</Text>
+                    </div>
+                    <ParameterForm
+                      key={selectedStep.config_key}
+                      parameters={selectedStepParams}
+                      value={stepOverrides[selectedStep.config_key] || {}}
+                      onChange={(next) => {
+                        setStepOverrides((prev) => ({ ...prev, [selectedStep.config_key as string]: next }))
+                      }}
+                    />
+                  </>
+                )}
+              </Card>
+
+              {interpretation?.zhPath ? (
+                <>
+                  <div style={{ height: 12 }} />
+                  <Card size="small" title="结果解读（中英草稿）">
+                    <Text type="secondary" style={{ display: 'block', marginBottom: 10 }}>
+                      由 OmicsFlowCore R 包在输出目录 <code>_pipeline/</code> 下自动生成；点击「文档视图」以纸张式阅读，便于对照修改后写入论文。
+                    </Text>
+                    <Space wrap>
+                      <Button type="primary" onClick={() => setInterpretModalOpen(true)}>
+                        文档视图
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={async () => {
+                          if (!interpretation.zhPath) return
+                          const r = await window.electronAPI.showItemInFolder(interpretation.zhPath)
+                          if (!r.success) message.warning(r.error || '无法打开文件夹')
+                        }}
+                      >
+                        在文件夹中显示
+                      </Button>
+                    </Space>
+                  </Card>
+
+                  <InterpretationDocModal
+                    open={interpretModalOpen}
+                    onClose={() => setInterpretModalOpen(false)}
+                    title="结果解读（文档视图）"
+                    zhContent={interpretation.zh || ''}
+                    enContent={interpretation.en || ''}
+                    showNotes={false}
+                    onShowInFolder={async () => {
+                      if (!interpretation?.zhPath) return
                       const r = await window.electronAPI.showItemInFolder(interpretation.zhPath)
                       if (!r.success) message.warning(r.error || '无法打开文件夹')
                     }}
-                  >
-                    在文件夹中显示
-                  </Button>
-                </Space>
+                  />
+                </>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <>
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                minHeight: 0,
+                display: 'flex',
+                borderRight: '1px solid #f0f0f0',
+              }}
+            >
+              {loading ? (
+                <div style={{ padding: 24 }}>
+                  <Spin />
+                </div>
+              ) : (
+                <PipelineComposerCanvas
+                  modules={composerModules}
+                  paletteCollapsed={composerLeftCollapsed}
+                  checkConnection={checkComposerConnection}
+                  disabled={running}
+                  rfRef={composerRfRef}
+                  nodes={compNodes}
+                  edges={compEdges}
+                  onNodesChange={onCompNodesChange}
+                  onEdgesChange={onCompEdgesChange}
+                  setNodes={setCompNodes}
+                  setEdges={setCompEdges}
+                  selectedId={composerSelectedId}
+                  onSelect={setComposerSelectedId}
+                />
+              )}
+            </div>
+
+            {!composerRightCollapsed ? (
+            <div className={styles.panel}>
+              <Card size="small" title="接续建议">
+                {!selectedComposerModule ? (
+                  <div className={styles.hint}>点击画布上的模块查看「建议下一步」；系统会根据常见分析链推荐候选模块。</div>
+                ) : recommendNextModules.length === 0 ? (
+                  <div className={styles.hint}>当前模块暂无内置推荐（可按你的目的自由拼接）。</div>
+                ) : (
+                  <div>
+                    <Text>在「{selectedComposerModule.title}」之后，通常可接续：</Text>
+                    {recommendNextModules.map((m) => (
+                      <div
+                        key={m.key}
+                        style={{
+                          marginTop: 8,
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Text strong>{m.title}</Text>
+                          <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                            {m.functionName}
+                          </Text>
+                        </div>
+                        <Button
+                          type="link"
+                          size="small"
+                          style={{ flexShrink: 0, padding: '0 4px' }}
+                          onClick={() => handleAddRecommendedModule(m)}
+                        >
+                          添加并连线
+                        </Button>
+                      </div>
+                    ))}
+                    <div className={styles.hint} style={{ marginTop: 8 }}>
+                      也可点击「添加并连线」自动加入画布并接上当前模块；或从左侧拖入后手动连线。
+                    </div>
+                  </div>
+                )}
               </Card>
 
-              <InterpretationDocModal
-                open={interpretModalOpen}
-                onClose={() => setInterpretModalOpen(false)}
-                title="结果解读（文档视图）"
-                zhContent={interpretation.zh || ''}
-                enContent={interpretation.en || ''}
-                showNotes={false}
-                onShowInFolder={async () => {
-                  if (!interpretation?.zhPath) return
-                  const r = await window.electronAPI.showItemInFolder(interpretation.zhPath)
-                  if (!r.success) message.warning(r.error || '无法打开文件夹')
-                }}
-              />
-            </>
-          ) : null}
-        </div>
+              <div style={{ height: 12 }} />
+
+              <Card size="small" title={selectedComposerNode ? `模块参数：${selectedComposerNode.data.title}` : '模块参数'}>
+                {!selectedComposerNode || !selectedComposerModule ? (
+                  <div className={styles.hint}>请点击画布上的一个模块以编辑该步 R 函数参数（会与上方全局参数合并后调用）。</div>
+                ) : composerStepParams.length === 0 ? (
+                  <div className={styles.hint}>正在加载 {selectedComposerModule.functionName} 的参数定义…</div>
+                ) : (
+                  <>
+                    <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                      {selectedComposerModule.title}（{selectedComposerModule.functionName}）
+                    </Text>
+                    <ParameterForm
+                      key={selectedComposerNode.id}
+                      parameters={composerStepParams}
+                      value={selectedComposerNode.data.params}
+                      onChange={(next) => {
+                        setCompNodes((ns) =>
+                          ns.map((n) =>
+                            n.id === selectedComposerNode.id ? { ...n, data: { ...n.data, params: next } } : n
+                          )
+                        )
+                      }}
+                    />
+                  </>
+                )}
+              </Card>
+            </div>
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   )

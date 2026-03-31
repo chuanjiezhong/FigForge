@@ -10,6 +10,17 @@
           "name": "transcriptome_normalize_matrix",
           "category": "transcriptomics",
           "description": "标准化表达矩阵并保存到本地",
+          "io": {
+            "consumes": ["expr_matrix_file", "group_file"],
+            "produces": ["expr_norm_file"],
+            "bindings": {
+              "expr_file": "expr_matrix_file",
+              "group_file": "group_file",
+              "out_dir": "out_dir",
+              "outputs.expr_file": "expr_norm_file",
+              "outputs.normalize_file": "expr_norm_file"
+            }
+          },
           "documentation": "标准化表达矩阵并保存到本地\n\n读取原始表达矩阵文件和分组信息文件（对照组/实验组），进行重复探针平均、可选 log2 转换、数组间标准化（normalizeBetweenArrays），最终输出加标签的标准化表达矩阵。\n\n@return 返回标准化后的表达矩阵（数值型，行是基因，列是样本）",
           "detailedParameters": [
             {
@@ -73,6 +84,18 @@
           "name": "transcriptome_plot_heatmap_limma",
           "category": "transcriptomics",
           "redrawFunction": "transcriptome_redraw_heatmap_rds",
+          "io": {
+            "consumes": ["expr_norm_file"],
+            "produces": ["deg_table_file", "heatmap_file"],
+            "bindings": {
+              "expr_file": "expr_norm_file",
+              "out_dir": "out_dir",
+              "outputs.deg_file": "deg_table_file",
+              "outputs.sig_deg_file": "deg_table_sig_file",
+              "outputs.heatmap_file": "heatmap_file",
+              "outputs.heatmap_rds": "heatmap_rds"
+            }
+          },
           "redrawParameters": [
             { "name": "rds_file", "type": "string", "required": true, "default": "heatmap.rds" },
             { "name": "out_file", "type": "string", "required": false, "default": "heatmap_redraw_preview.png" },
@@ -336,6 +359,16 @@
           "name": "transcriptome_read_expr_matrix",
           "category": "transcriptomics",
           "description": "从 GEO 的 probe.txt + ann.txt 生成按基因合并的表达矩阵",
+          "io": {
+            "consumes": ["geo_probe_file", "geo_ann_file"],
+            "produces": ["expr_matrix_file"],
+            "bindings": {
+              "probe_file": "geo_probe_file",
+              "ann_file": "geo_ann_file",
+              "out_dir": "out_dir",
+              "outputs.expr_file": "expr_matrix_file"
+            }
+          },
           "documentation": "从 probe.txt + ann.txt 生成表达矩阵（按基因合并）\n\n从 GEO 的 series_matrix/probe 表中提取表达矩阵，并用注释文件把探针 ID 映射到基因名；支持过滤明显“非基因名”的 symbol，并对重复基因（多个探针）取均值合并。\n\n@param probe_file character；表达矩阵文件路径（支持包含 `!series_matrix_table_begin` 的 GEO 格式）。\n@param ann_file character；注释文件路径（第 1 列为探针 ID；默认第 11 列为 Gene Symbol）。\n@param out_dir character；输出目录，默认当前目录。\n@param prefix character；输出文件名前缀，默认 \"expr_matrix\"。\n@param gene_symbol_col integer；基因名所在列（1-based），默认 11。\n@param max_ann_rows integer；读取注释表最大行数，默认 60000。\n@param write_excel_safe logical；是否额外输出 Excel 安全版本（基因名前加 `'`），默认 TRUE。\n@param overwrite logical；是否覆盖输出文件，默认 FALSE。\n\n@return 不可见 list，包含表达矩阵、probe 合并信息和输出路径。",
           "detailedParameters": [
             {
@@ -404,6 +437,15 @@
           "name": "transcriptome_count_to_tpm",
           "category": "transcriptomics",
           "description": "将基因 count 矩阵转换为 TPM（使用基因 effective_length）",
+          "io": {
+            "consumes": ["count_matrix_file"],
+            "produces": ["expr_matrix_file"],
+            "bindings": {
+              "count_file": "count_matrix_file",
+              "out_dir": "out_dir",
+              "outputs.expr_file": "expr_matrix_file"
+            }
+          },
           "documentation": "将 count 矩阵转换为 TPM（使用基因 effective_length）\n\n读取原始基因 count 矩阵和对应物种的基因长度文件（effective_length 列），进行重复基因名合并、过滤 0 表达基因，并计算 TPM 与 log2(TPM+1)。\n\n@param count_file character；count 矩阵文件路径，首列为基因名，后续列为样本 read count。\n@param species character；物种，\"human\" 或 \"mouse\"。\n@param out_dir character；输出目录，默认当前工作目录。\n@param out_prefix character；输出文件前缀，默认 \"TPM\"。\n@param log2 logical；是否同时输出 log2TPM（log2(TPM+1)），默认 TRUE。\n\n@return 不可见 list，包含 TPM 矩阵和（可选）log2TPM 矩阵。",
           "detailedParameters": [
             {
@@ -453,6 +495,15 @@
           "name": "transcriptome_merge_normalize_combat",
           "category": "transcriptomics",
           "description": "合并多个标准化表达矩阵并可选进行 ComBat 批次校正",
+          "io": {
+            "consumes": ["expr_norm_file_multi"],
+            "produces": ["expr_norm_file"],
+            "bindings": {
+              "files": "expr_norm_file_multi",
+              "out_dir": "out_dir",
+              "outputs.expr_file": "expr_norm_file"
+            }
+          },
           "documentation": "合并多个标准化表达矩阵并进行 ComBat 批次校正\n\n批量读取以 `.normalize.txt` 结尾的表达矩阵文件，先对每个矩阵做重复基因平均（limma::avereps），取共同基因后合并成一个矩阵；可选用 sva::ComBat 进行批次效应校正。\n\n输入文件支持两种常见格式：\n- 第一列为基因名，其余列为样本（带列名）\n- 第一行以 `id`/`geneNames` 开头，存放样本名（无列名）；其余行为表达矩阵\n\n@param input_dir character；输入目录，默认当前目录。\n@param pattern character；用于筛选输入文件的正则，默认 \"\\\\.normalize\\\\.txt$\"。\n@param files character|NULL；显式指定文件路径向量（优先于 input_dir+pattern），默认 NULL。\n@param out_dir character；输出目录，默认当前目录。\n@param prefix character；输出文件名前缀，默认 \"merge\"。\n@param overwrite logical；是否覆盖输出文件，默认 FALSE。\n@param do_combat logical；是否做 ComBat 批次校正，默认 TRUE。\n@param par_prior logical；ComBat 参数，默认 TRUE。\n@param batch_from_filename logical；是否从文件名提取数据集名作为 batch，默认 FALSE（按读入顺序分批）。\n@param batch_regex character；当 batch_from_filename=TRUE 时，用于提取 batch 的正则（第1个捕获组），默认 \"^([^.\\-]+)\"。\n\n@return 不可见 list，包含合并矩阵、校正矩阵（若启用）、批次向量与输出路径。",
           "detailedParameters": [
             {
@@ -536,6 +587,16 @@
           "name": "transcriptome_plot_volcano",
           "category": "transcriptomics",
           "redrawFunction": "transcriptome_redraw_volcano_rds",
+          "io": {
+            "consumes": ["deg_table_file"],
+            "produces": ["volcano_file"],
+            "bindings": {
+              "expr_file": "deg_table_file",
+              "out_dir": "out_dir",
+              "outputs.volcano_file": "volcano_file",
+              "outputs.volcano_rds": "volcano_rds"
+            }
+          },
           "redrawParameters": [
             { "name": "rds_file", "type": "string", "required": true, "default": "volcano.rds" },
             { "name": "out_file", "type": "string", "required": false, "default": "volcano_redraw.pdf" },
@@ -695,6 +756,17 @@
           "name": "transcriptome_plot_pca",
           "category": "transcriptomics",
           "redrawFunction": "transcriptome_redraw_pca_rds",
+          "io": {
+            "consumes": ["expr_norm_file"],
+            "produces": ["pca_file"],
+            "bindings": {
+              "input_file": "expr_norm_file",
+              "out_dir": "out_dir",
+              "out_file": "pca_file",
+              "outputs.pca_file": "pca_file",
+              "outputs.pca_rds": "pca_rds"
+            }
+          },
           "redrawParameters": [
             { "name": "rds_file", "type": "string", "required": true, "default": "pca.rds" },
             { "name": "out_file", "type": "string", "required": false, "default": "pca_redraw.pdf" },
